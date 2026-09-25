@@ -1,108 +1,69 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:easy_localization/easy_localization.dart';
+import 'package:shadhinjatra/services/auth_service.dart';
+import 'package:shadhinjatra/screens/login_screen.dart';
+import 'package:shadhinjatra/screens/main_navigation.dart';
 
-void main() {
-  runApp(const MyApp());
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // If you're going to use other Firebase services in the background, such as Firestore,
+  // make sure you call `initializeApp` before using other Firebase services.
+  debugPrint("Handling a background message: ${message.messageId}");
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await EasyLocalization.ensureInitialized();
+  
+  try {
+    await Firebase.initializeApp();
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  } catch (e) {
+    debugPrint("Firebase init failed (missing google-services.json?): $e");
+  }
+
+  final bool isLoggedIn = await AuthService.isLoggedIn();
+  runApp(
+    EasyLocalization(
+      supportedLocales: const [
+        Locale('en'),
+        Locale('bn'),
+        Locale('hi'),
+        Locale('ar'),
+        Locale('es'),
+        Locale('fr'),
+        Locale('zh'),
+        Locale('pt'),
+        Locale('ru'),
+        Locale('id'),
+        Locale('tr'),
+        Locale('de'),
+      ],
+      path: 'assets/translations',
+      fallbackLocale: const Locale('en'),
+      child: MyApp(isLoggedIn: isLoggedIn),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final bool isLoggedIn;
+  
+  const MyApp({super.key, required this.isLoggedIn});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Shadhin Jatra User',
+      localizationsDelegates: context.localizationDelegates,
+      supportedLocales: context.supportedLocales,
+      locale: context.locale,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const MyHomePage(title: 'Shadhin Jatra API Status'),
-    );
-  }
-}
-
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  String _apiStatus = 'Checking status...';
-  bool _isLoading = false;
-
-  Future<void> _checkApiStatus() async {
-    setState(() {
-      _isLoading = true;
-      _apiStatus = 'Checking status...';
-    });
-    
-    try {
-      final response = await http.get(Uri.parse('https://shadhinjatra.test/api/status'));
-      
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        setState(() {
-          _apiStatus = 'Success: ${data['message']}\nVersion: ${data['version']}';
-        });
-      } else {
-        setState(() {
-          _apiStatus = 'Error: Received status code ${response.statusCode}';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _apiStatus = 'Error connecting to API:\n$e';
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _checkApiStatus();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(widget.title),
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              const Text(
-                'API Status:',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 20),
-              _isLoading 
-                  ? const CircularProgressIndicator() 
-                  : Text(
-                      _apiStatus,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-            ],
-          ),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _checkApiStatus,
-        tooltip: 'Refresh Status',
-        child: const Icon(Icons.refresh),
-      ),
+      home: isLoggedIn ? const MainNavigation() : const LoginScreen(),
     );
   }
 }
