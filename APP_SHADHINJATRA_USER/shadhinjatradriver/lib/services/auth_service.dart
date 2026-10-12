@@ -262,4 +262,61 @@ class AuthService {
       debugPrint("Failed to update language: $e");
     }
   }
+
+  static Future<Map<String, dynamic>> fetchRoute(double startLat, double startLng, double endLat, double endLng) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/map/route?start=$startLng,$startLat&end=$endLng,$endLat'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+  static Future<Map<String, dynamic>> fetchNotifications() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/account/notifications'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchEarnings(int days) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/earnings?days=$days'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shadhinjatra/services/auth_service.dart';
+import 'package:image_picker/image_picker.dart';
 import 'edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -14,6 +15,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
+  bool _isUploading = false;
 
   @override
   void initState() {
@@ -40,6 +42,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _uploadAvatar() async {
+    final picker = ImagePicker();
+    final XFile? image = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+    if (image == null) return;
+
+    setState(() => _isUploading = true);
+
+    try {
+      final result = await AuthService.uploadAvatar(image);
+      if (result['success'] == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile picture updated!')));
+          _fetchProfile(); // Refresh profile
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message'] ?? 'Failed to upload')));
+        }
+      }
+    } catch (e) {
+       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Upload failed')));
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -58,6 +86,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileContent() {
+    final avatarUrl = AuthService.fixImageUrl(_userData!['avatar']);
     return SingleChildScrollView(
       child: Column(
         children: [
@@ -72,20 +101,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     CircleAvatar(
                       radius: 50,
                       backgroundColor: Colors.deepPurple.shade100,
-                      backgroundImage: _userData!['avatar'] != null ? NetworkImage(_userData!['avatar']) : null,
-                      child: _userData!['avatar'] == null ? const Icon(Icons.person, size: 50, color: Colors.deepPurple) : null,
+                      backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
+                      child: avatarUrl.isEmpty ? const Icon(Icons.person, size: 50, color: Colors.deepPurple) : null,
                     ),
                     Positioned(
                       bottom: 0,
                       right: 0,
                       child: Container(
                         decoration: const BoxDecoration(color: Colors.deepPurple, shape: BoxShape.circle),
-                        child: IconButton(
-                          icon: const Icon(Icons.camera_alt, color: Colors.white, size: 20),
-                          onPressed: () {
-                            // Implement avatar upload
-                          },
-                        ),
+                        child: _isUploading
+                            ? const Padding(padding: EdgeInsets.all(8), child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
+                            : IconButton(
+                                icon: const Icon(Icons.camera_alt, color: Colors.white, size: 20),
+                                onPressed: _uploadAvatar,
+                              ),
                       ),
                     ),
                   ],

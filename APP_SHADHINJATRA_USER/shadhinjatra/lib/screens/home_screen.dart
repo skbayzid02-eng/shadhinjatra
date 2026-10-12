@@ -8,8 +8,8 @@ import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shadhinjatra/services/auth_service.dart';
 import 'package:shadhinjatra/screens/account/notifications/notifications_screen.dart';
-
 import 'package:shadhinjatra/screens/account/account_dashboard.dart';
+import 'dart:ui';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -23,7 +23,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _pickupController = TextEditingController();
   final TextEditingController _dropoffController = TextEditingController();
 
-  LatLng _currentLocation = const LatLng(23.8103, 90.4125); // Default Dhaka
+  LatLng _currentLocation = const LatLng(23.8103, 90.4125);
   LatLng? _pickupLatLng;
   LatLng? _dropoffLatLng;
   List<LatLng> _routePolyline = [];
@@ -37,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _selectedVehicle = 'Car';
   double _fareAmount = 0.0;
   String _paymentMethod = 'online';
+  String _userName = '';
 
   final List<Map<String, dynamic>> _vehicles = [
     {'name': 'Car', 'icon': 'directions_car', 'base_fare': 50.0, 'per_km_rate': 20.0, 'per_min_rate': 2.0, 'min_fare': 80.0, 'capacity': '2-4 pass'},
@@ -51,18 +52,26 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _getUserLocation();
+    _fetchUserName();
+  }
+
+  Future<void> _fetchUserName() async {
+    final data = await AuthService.fetchAccountData();
+    if (data['success'] == true) {
+      if (mounted) setState(() => _userName = data['data']['name']?.split(' ')[0] ?? '');
+    }
   }
 
   Future<Iterable<Map<String, dynamic>>> _searchLocation(String query) async {
     if (query.length < 3) return const Iterable<Map<String, dynamic>>.empty();
     try {
       final response = await http.get(
-        Uri.parse('https://nominatim.openstreetmap.org/search?format=json&q=$query&countrycodes=bd&limit=5'),
+        Uri.parse('https://nominatim.openstreetmap.org/search?format=json&q=$query&countrycodes=bd&limit=10'),
         headers: {'User-Agent': 'ShadhinJatraApp/1.0'},
       );
       final data = jsonDecode(response.body) as List;
       return data.map((e) => e as Map<String, dynamic>).toList();
-    } catch(e) {
+    } catch (e) {
       return const Iterable<Map<String, dynamic>>.empty();
     }
   }
@@ -90,7 +99,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   double _calculateFareForVehicle(Map<String, dynamic> vehicle) {
     if (_distanceKm == 0) return 0.0;
-
     final base = (vehicle['base_fare'] as num).toDouble();
     final perKm = (vehicle['per_km_rate'] as num).toDouble();
     final perMin = (vehicle['per_min_rate'] as num).toDouble();
@@ -134,7 +142,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         final routeRes = await AuthService.route(startCoords, endCoords);
         if (routeRes['success'] == true) {
-          final dist = (routeRes['distance'] as num).toDouble() / 1000.0; // km
+          final dist = (routeRes['distance'] as num).toDouble() / 1000.0;
           final durSeconds = (routeRes['duration'] as num).toDouble();
           final geom = routeRes['geometry'] as List<dynamic>;
 
@@ -148,7 +156,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           final bounds = LatLngBounds.fromPoints(_routePolyline);
           _mapController.fitCamera(
-            CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)),
+            CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(80)),
           );
         }
       }
@@ -222,30 +230,39 @@ class _HomeScreenState extends State<HomeScreen> {
           if (status == 'ongoing' || status == 'accepted') {
             timer.cancel();
             if (mounted) {
-              setState(() {
-                _isRideRequested = false;
-                // Add a new boolean if we need to show driver info, for now we just show dialog
-              });
+              setState(() => _isRideRequested = false);
               
-              // Show Success Dialog
               showDialog(
                 context: context,
                 barrierDismissible: true,
                 builder: (BuildContext context) {
                   return AlertDialog(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                     content: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.check_circle, color: Colors.green, size: 80),
-                        const SizedBox(height: 16),
-                        const Text('Successful!', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), shape: BoxShape.circle),
+                          child: const Icon(Icons.check_circle, color: Colors.green, size: 60),
+                        ),
+                        const SizedBox(height: 20),
+                        const Text('Ride Confirmed!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 12),
-                        const Text('A driver has accepted your ride request!', textAlign: TextAlign.center, style: TextStyle(fontSize: 16)),
-                        const SizedBox(height: 16),
-                        ElevatedButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('OK'),
+                        const Text('A driver is on the way.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.black54)),
+                        const SizedBox(height: 24),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.black,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('View Status'),
+                          ),
                         )
                       ],
                     ),
@@ -270,31 +287,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey.shade100,
-      appBar: AppBar(
-        backgroundColor: Colors.deepPurple,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.menu),
-          onPressed: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountDashboard()));
-          },
-        ),
-        title: const Text(
-          'Shadhin Jatra',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
-        ),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications),
-            onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
-            },
-          )
-        ],
-      ),
+      extendBodyBehindAppBar: true,
       body: Stack(
         children: [
           // 1. Map Layer
@@ -306,7 +299,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: (tapPosition, point) {
                 if (_isRideRequested) return;
                 
-                if (_pickupLatLng == null || _pickupController.text == "Current Location") {
+                if (_pickupLatLng == null) {
                   setState(() {
                     _pickupLatLng = point;
                     _pickupController.text = "${point.latitude.toStringAsFixed(4)}, ${point.longitude.toStringAsFixed(4)}";
@@ -330,8 +323,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   polylines: [
                     Polyline(
                       points: _routePolyline,
-                      color: Colors.blue,
-                      strokeWidth: 5.0,
+                      color: Colors.black,
+                      strokeWidth: 4.0,
                     )
                   ],
                 ),
@@ -342,7 +335,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       point: _pickupLatLng!,
                       width: 50,
                       height: 50,
-                      child: const Icon(Icons.location_on, color: Colors.blue, size: 40),
+                      child: Column(
+                        children: [
+                           const Icon(Icons.location_on, color: Colors.black, size: 40),
+                           Container(decoration: const BoxDecoration(color: Colors.black, shape: BoxShape.circle), width: 8, height: 8)
+                        ],
+                      ),
                     ),
                   if (_dropoffLatLng != null)
                     Marker(
@@ -356,130 +354,138 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
 
-          // 2. Map Controls (Zoom, My Location)
+          // 2. Custom Top Bar
           Positioned(
-            right: 16,
-            bottom: _distanceKm > 0 ? 320 : 16, // Adjust based on bottom sheet
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            top: MediaQuery.of(context).padding.top + 10,
+            left: 20,
+            right: 20,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                FloatingActionButton(
-                  heroTag: 'zoom_in',
-                  mini: true,
-                  backgroundColor: Colors.white,
-                  onPressed: () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom + 1),
-                  child: const Icon(Icons.add, color: Colors.black),
+                _buildFloatingIcon(
+                  icon: _distanceKm > 0 && !_isRideRequested ? Icons.arrow_back : Icons.menu,
+                  onTap: () {
+                    if (_distanceKm > 0 && !_isRideRequested) {
+                      setState(() {
+                        _distanceKm = 0.0;
+                        _durationMins = 0;
+                        _routePolyline = [];
+                        _dropoffLatLng = null;
+                        _dropoffController.clear();
+                        if (_pickupLatLng != null) _mapController.move(_pickupLatLng!, 15.0);
+                      });
+                    } else {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountDashboard()));
+                    }
+                  }
                 ),
-                const SizedBox(height: 8),
-                FloatingActionButton(
-                  heroTag: 'zoom_out',
-                  mini: true,
-                  backgroundColor: Colors.white,
-                  onPressed: () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom - 1),
-                  child: const Icon(Icons.remove, color: Colors.black),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton(
-                  heroTag: 'my_location',
-                  mini: true,
-                  backgroundColor: Colors.deepPurple,
-                  onPressed: () => _mapController.move(_currentLocation, 15.0),
-                  child: const Icon(Icons.my_location, color: Colors.white),
-                ),
+                _buildFloatingIcon(
+                  icon: Icons.notifications_none_rounded,
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen())),
+                )
               ],
             ),
           ),
 
-          // 3. Top Search Panel (Pickup & Destination)
+          // 3. Modern Search Panel (Dynamic Position)
+          if (_distanceKm == 0)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 80,
+              left: 20,
+              right: 20,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 20, offset: const Offset(0, 10))],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_userName.isNotEmpty) ...[
+                          Text('Hello, $_userName', style: const TextStyle(color: Colors.grey, fontSize: 14)),
+                          const SizedBox(height: 4),
+                        ],
+                        const Text('Where to?', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 24, letterSpacing: -0.5)),
+                        const SizedBox(height: 20),
+                        
+                        // Inputs
+                        Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Column(
+                            children: [
+                              _buildSearchField(
+                                controller: _pickupController,
+                                hint: 'Current Location',
+                                icon: Icons.circle,
+                                iconColor: Colors.blue,
+                                isDestination: false
+                              ),
+                              Divider(height: 1, indent: 40, endIndent: 20, color: Colors.grey.shade300),
+                              _buildSearchField(
+                                controller: _dropoffController,
+                                hint: 'Search destination',
+                                icon: Icons.square,
+                                iconColor: Colors.black,
+                                isDestination: true
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Row(
+                          children: [
+                            _buildQuickAction(Icons.home_filled, 'Home'),
+                            const SizedBox(width: 12),
+                            _buildQuickAction(Icons.work, 'Work'),
+                            const SizedBox(width: 12),
+                            _buildQuickAction(Icons.star, 'Saved'),
+                          ],
+                        )
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          // 4. Map Controls (Zoom, My Location)
           Positioned(
-            top: 16,
-            left: 16,
-            right: 16,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.95),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 5))],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Autocomplete<Map<String, dynamic>>(
-                    optionsBuilder: (TextEditingValue textEditingValue) => _searchLocation(textEditingValue.text),
-                    displayStringForOption: (option) => option['display_name'] ?? '',
-                    onSelected: (option) {
-                      setState(() {
-                        _pickupController.text = option['display_name'];
-                        _pickupLatLng = LatLng(double.parse(option['lat']), double.parse(option['lon']));
-                      });
-                      _fetchRoute();
-                    },
-                    fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
-                      if (_pickupController.text != controller.text && focusNode.hasFocus == false) {
-                        controller.text = _pickupController.text;
-                      }
-                      return TextField(
-                        controller: controller,
-                        focusNode: focusNode,
-                        decoration: InputDecoration(
-                          labelText: 'Pickup Location',
-                          prefixIcon: const Icon(Icons.circle, color: Colors.blue, size: 16),
-                          filled: true,
-                          fillColor: Colors.grey.shade100,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                        ),
-                        onChanged: (val) => _pickupController.text = val,
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  Autocomplete<Map<String, dynamic>>(
-                    optionsBuilder: (TextEditingValue textEditingValue) => _searchLocation(textEditingValue.text),
-                    displayStringForOption: (option) => option['display_name'] ?? '',
-                    onSelected: (option) {
-                      setState(() {
-                        _dropoffController.text = option['display_name'];
-                        _dropoffLatLng = LatLng(double.parse(option['lat']), double.parse(option['lon']));
-                      });
-                      _fetchRoute();
-                    },
-                    fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
-                      if (_dropoffController.text != controller.text && focusNode.hasFocus == false) {
-                        controller.text = _dropoffController.text;
-                      }
-                      return TextField(
-                        controller: controller,
-                        focusNode: focusNode,
-                        decoration: InputDecoration(
-                          labelText: 'Where do you want to go?',
-                          prefixIcon: const Icon(Icons.location_on, color: Colors.red),
-                          filled: true,
-                          fillColor: Colors.grey.shade100,
-                          suffixIcon: _isRouting
-                              ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(strokeWidth: 2))
-                              : IconButton(icon: const Icon(Icons.search, color: Colors.deepPurple), onPressed: _fetchRoute),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                        ),
-                        onChanged: (val) => _dropoffController.text = val,
-                      );
-                    },
-                  ),
-                ],
-              ),
+            right: 20,
+            bottom: _distanceKm > 0 ? 380 : 30,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildMapControl(Icons.my_location, () => _mapController.move(_currentLocation, 15.0), isPrimary: true),
+                const SizedBox(height: 12),
+                _buildMapControl(Icons.add, () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom + 1)),
+                const SizedBox(height: 8),
+                _buildMapControl(Icons.remove, () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom - 1)),
+              ],
             ),
           ),
 
-          // 4. Vehicle Selection & Fare Panel
+          // 5. Vehicle Selection & Fare Panel
           if (_distanceKm > 0 && !_isRideRequested)
             Positioned(
               bottom: 0,
               left: 0,
               right: 0,
-              child: _buildVehicleSelectionPanel(),
+              child: _buildModernVehiclePanel(),
             ),
 
-          // 5. Finding Drivers State
+          // 6. Finding Drivers State
           if (_isRideRequested)
             Positioned(
               bottom: 0,
@@ -492,30 +498,160 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildVehicleSelectionPanel() {
+  Widget _buildFloatingIcon({required IconData icon, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 4))],
+        ),
+        child: Icon(icon, color: Colors.black87, size: 24),
+      ),
+    );
+  }
+
+  Widget _buildMapControl(IconData icon, VoidCallback onTap, {bool isPrimary = false}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isPrimary ? Colors.black : Colors.white,
+          shape: BoxShape.circle,
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 4))],
+        ),
+        child: Icon(icon, color: isPrimary ? Colors.white : Colors.black87, size: 22),
+      ),
+    );
+  }
+
+  Widget _buildQuickAction(IconData icon, String label) {
     return Container(
-      padding: const EdgeInsets.all(20.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: Colors.black87),
+          const SizedBox(width: 6),
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchField({required TextEditingController controller, required String hint, required IconData icon, required Color iconColor, required bool isDestination}) {
+    return Autocomplete<Map<String, dynamic>>(
+      optionsBuilder: (TextEditingValue textEditingValue) => _searchLocation(textEditingValue.text),
+      displayStringForOption: (option) => option['display_name'] ?? '',
+      optionsViewBuilder: (context, onSelected, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 8,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: 250, maxWidth: MediaQuery.of(context).size.width - 40),
+              child: ListView.separated(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: options.length,
+                separatorBuilder: (context, index) => Divider(height: 1, color: Colors.grey.shade200),
+                itemBuilder: (context, index) {
+                  final option = options.elementAt(index);
+                  final name = option['display_name'] ?? '';
+                  final parts = name.split(',');
+                  final shortName = parts.isNotEmpty ? parts[0] : name;
+                  final subName = parts.length > 1 ? parts.sublist(1).join(',').trim() : '';
+                  return ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: Colors.grey.shade100, shape: BoxShape.circle),
+                      child: const Icon(Icons.location_on, color: Colors.black54),
+                    ),
+                    title: Text(shortName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: subName.isNotEmpty ? Text(subName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)) : null,
+                    onTap: () => onSelected(option),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+      onSelected: (option) {
+        setState(() {
+          controller.text = option['display_name'];
+          if (isDestination) {
+            _dropoffLatLng = LatLng(double.parse(option['lat']), double.parse(option['lon']));
+            _fetchRoute();
+          } else {
+            _pickupLatLng = LatLng(double.parse(option['lat']), double.parse(option['lon']));
+          }
+        });
+      },
+      fieldViewBuilder: (context, fieldController, focusNode, onFieldSubmitted) {
+        if (controller.text != fieldController.text && !focusNode.hasFocus) {
+          fieldController.text = controller.text;
+        }
+        return TextField(
+          controller: fieldController,
+          focusNode: focusNode,
+          style: const TextStyle(fontWeight: FontWeight.w500),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(color: Colors.grey.shade500, fontWeight: FontWeight.normal),
+            prefixIcon: Icon(icon, color: iconColor, size: 14),
+            border: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            suffixIcon: isDestination && _isRouting 
+               ? const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black)))
+               : null
+          ),
+          onChanged: (val) => controller.text = val,
+        );
+      },
+    );
+  }
+
+  Widget _buildModernVehiclePanel() {
+    return Container(
+      padding: const EdgeInsets.all(24.0),
+      decoration: const BoxDecoration(
         color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, -5))],
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20, offset: Offset(0, -5))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          Center(
+             child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)))
+          ),
+          const SizedBox(height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Select Vehicle', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-              Text('$_distanceKm KM • $_durationMins Min', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+              const Text('Choose a ride', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 22, letterSpacing: -0.5)),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(12)),
+                child: Text('$_durationMins min • $_distanceKm km', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+              )
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           SizedBox(
-            height: 180,
+            height: 200,
             child: ListView.builder(
               padding: EdgeInsets.zero,
+              physics: const BouncingScrollPhysics(),
               itemCount: _vehicles.length,
               itemBuilder: (context, index) {
                 final v = _vehicles[index];
@@ -538,38 +674,46 @@ class _HomeScreenState extends State<HomeScreen> {
                     setState(() => _selectedVehicle = v['name']);
                     _updateFare();
                   },
-                  child: Container(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
                     margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: isSelected ? Colors.deepPurple.withValues(alpha: 0.05) : Colors.white,
+                      color: isSelected ? Colors.black : Colors.white,
                       border: Border.all(
-                        color: isSelected ? Colors.deepPurple : Colors.grey.shade300,
+                        color: isSelected ? Colors.black : Colors.grey.shade200,
                         width: 2,
                       ),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: isSelected ? [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 10, offset: const Offset(0, 4))] : [],
                     ),
                     child: Row(
                       children: [
-                        Icon(getIcon(v['icon'] ?? ''), color: isSelected ? Colors.deepPurple : Colors.grey.shade700, size: 40),
+                        Icon(getIcon(v['icon'] ?? ''), color: isSelected ? Colors.white : Colors.black87, size: 36),
                         const SizedBox(width: 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(v['name'], style: TextStyle(fontSize: 16, fontWeight: isSelected ? FontWeight.bold : FontWeight.w600)),
+                              Text(v['name'], style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: isSelected ? Colors.white : Colors.black)),
                               const SizedBox(height: 4),
-                              Text('Est: $_durationMins min • $_distanceKm km', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                              Text(v['capacity'] ?? '', style: const TextStyle(color: Colors.blueGrey, fontSize: 11)),
+                              Row(
+                                children: [
+                                  Icon(Icons.person, size: 12, color: isSelected ? Colors.white70 : Colors.grey),
+                                  const SizedBox(width: 4),
+                                  Text(v['capacity'] ?? '', style: TextStyle(color: isSelected ? Colors.white70 : Colors.grey, fontSize: 12, fontWeight: FontWeight.w500)),
+                                ],
+                              )
                             ],
                           ),
                         ),
                         Text(
                           '৳$fare',
                           style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: isSelected ? Colors.deepPurple : Colors.black87,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: isSelected ? Colors.white : Colors.black,
+                            letterSpacing: -0.5
                           ),
                         ),
                       ],
@@ -579,50 +723,68 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
           ),
-          const Divider(height: 16),
-
-          const Text('Payment Method', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
           Row(
             children: [
               Expanded(
-                child: RadioListTile<String>(
-                  title: const Text('Online Payment'),
-                  value: 'online',
-                  groupValue: _paymentMethod,
-                  onChanged: (value) => setState(() => _paymentMethod = value!),
-                  contentPadding: EdgeInsets.zero,
-                  activeColor: Colors.deepPurple,
+                child: GestureDetector(
+                  onTap: () => setState(() => _paymentMethod = 'cash'),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: _paymentMethod == 'cash' ? Colors.grey.shade200 : Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.money, size: 20, color: _paymentMethod == 'cash' ? Colors.black : Colors.grey),
+                        const SizedBox(width: 8),
+                        Text('Cash', style: TextStyle(fontWeight: FontWeight.w700, color: _paymentMethod == 'cash' ? Colors.black : Colors.grey)),
+                      ],
+                    )
+                  ),
                 ),
               ),
               Expanded(
-                child: RadioListTile<String>(
-                  title: const Text('Cash'),
-                  value: 'cash',
-                  groupValue: _paymentMethod,
-                  onChanged: (value) => setState(() => _paymentMethod = value!),
-                  contentPadding: EdgeInsets.zero,
-                  activeColor: Colors.deepPurple,
+                child: GestureDetector(
+                  onTap: () => setState(() => _paymentMethod = 'online'),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: _paymentMethod == 'online' ? Colors.grey.shade200 : Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.credit_card, size: 20, color: _paymentMethod == 'online' ? Colors.black : Colors.grey),
+                        const SizedBox(width: 8),
+                        Text('Card / Digital', style: TextStyle(fontWeight: FontWeight.w700, color: _paymentMethod == 'online' ? Colors.black : Colors.grey)),
+                      ],
+                    )
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.deepPurple,
+                backgroundColor: Colors.black,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                elevation: 4,
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 0,
               ),
               onPressed: _isBooking ? null : _confirmRide,
               child: _isBooking
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
                   : Text(
                       'Confirm $_selectedVehicle',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
                     ),
             ),
           ),
@@ -633,11 +795,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildFindingDriversPanel() {
     return Container(
-      padding: const EdgeInsets.all(24.0),
-      decoration: BoxDecoration(
+      padding: const EdgeInsets.all(32.0),
+      decoration: const BoxDecoration(
         color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, -5))],
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20, offset: Offset(0, -5))],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -645,41 +807,41 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(
             width: double.infinity,
             height: 4,
-            child: LinearProgressIndicator(color: Colors.deepPurple, backgroundColor: Colors.black12),
+            child: LinearProgressIndicator(color: Colors.black, backgroundColor: Colors.black12),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Colors.deepPurple.withValues(alpha: 0.1),
+              color: Colors.black.withValues(alpha: 0.05),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.location_searching, size: 48, color: Colors.deepPurple),
+            child: const Icon(Icons.radar, size: 60, color: Colors.black),
           ),
           const SizedBox(height: 24),
           const Text(
-            'Finding nearby drivers...',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.deepPurple),
+            'Finding your ride...',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5),
           ),
           const SizedBox(height: 8),
           Text(
-            'Sending request to $_selectedVehicle drivers',
-            style: TextStyle(color: Colors.grey.shade600),
+            'Sending request to nearby $_selectedVehicle drivers',
+            style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w500),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
               style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red,
-                side: const BorderSide(color: Colors.red),
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                foregroundColor: Colors.black,
+                side: const BorderSide(color: Colors.black26, width: 2),
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
               onPressed: () {
                 setState(() => _isRideRequested = false);
               },
-              child: const Text('Cancel Request', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              child: const Text('Cancel Request', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
             ),
           )
         ],

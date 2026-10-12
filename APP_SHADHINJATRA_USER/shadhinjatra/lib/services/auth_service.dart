@@ -20,6 +20,12 @@ class AuthService {
     return 'http://127.0.0.1:8000/api';
   }
 
+  static String fixImageUrl(String? url) {
+    if (url == null || url.isEmpty) return '';
+    final String host = baseUrl.replaceAll('/api', '');
+    return url.replaceAll('http://localhost:8000', host).replaceAll('http://127.0.0.1:8000', host);
+  }
+
   static Future<Map<String, String>> getHeaders() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
@@ -145,6 +151,92 @@ class AuthService {
 
   static Future<Map<String, dynamic>> fetchAboutData() async {
     return _fetchData('about');
+  }
+
+  static Future<Map<String, dynamic>> fetchSupportData() async {
+    return _fetchData('support');
+  }
+
+  static Future<Map<String, dynamic>> submitSupportTicket(Map<String, dynamic> data) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/support/ticket'),
+        headers: headers,
+        body: jsonEncode(data),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchSecurityData() async {
+    return _fetchData('security');
+  }
+
+  static Future<Map<String, dynamic>> updatePassword(String currentPassword, String newPassword) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/security/password'),
+        headers: headers,
+        body: jsonEncode({'current_password': currentPassword, 'new_password': newPassword}),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateSecuritySettings(Map<String, dynamic> data) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/security/settings'),
+        headers: headers,
+        body: jsonEncode(data),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchSavedPlaces() async {
+    return _fetchData('account/places');
+  }
+
+  static Future<Map<String, dynamic>> addSavedPlace(Map<String, dynamic> data) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/account/places'),
+        headers: headers,
+        body: jsonEncode(data),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> deleteSavedPlace(int id) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/account/places/$id'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
   }
 
   static Future<Map<String, dynamic>> uploadAvatar(XFile image) async {

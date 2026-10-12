@@ -8,6 +8,11 @@ import 'package:shadhinjatra/screens/account/saved_places/saved_places_screen.da
 import 'package:shadhinjatra/screens/account/settings/settings_screen.dart';
 import 'package:shadhinjatra/screens/account/safety/safety_screen.dart';
 import 'package:shadhinjatra/screens/account/support/support_screen.dart';
+import 'package:shadhinjatra/screens/account/notifications/notifications_screen.dart';
+import 'package:shadhinjatra/screens/account/about/about_screen.dart';
+import 'package:shadhinjatra/screens/account/privacy/privacy_security_screen.dart';
+import 'package:shadhinjatra/screens/activity_screen.dart';
+import 'package:shadhinjatra/screens/login_screen.dart';
 
 class AccountDashboard extends StatefulWidget {
   const AccountDashboard({super.key});
@@ -43,7 +48,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
           _userEmail = data['data']['email'] ?? '';
           _userPhone = data['data']['phone'] ?? '';
           _rating = data['data']['rating']?.toString() ?? '4.8';
-          _avatarUrl = data['data']['avatar'];
+          _avatarUrl = AuthService.fixImageUrl(data['data']['avatar']);
         });
       }
     } catch (e) {
@@ -57,6 +62,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
       }
     }
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -70,22 +76,55 @@ class _AccountDashboardState extends State<AccountDashboard> {
       body: SingleChildScrollView(
         child: Column(
           children: [
+            // 1. Profile
             _buildProfileHeader(),
             const SizedBox(height: 16),
+            
+            // Financials
             _buildMenuSection([
-              _buildMenuItem(Icons.account_balance_wallet, 'Wallet & Payment', () => _navigateTo(const WalletScreen())),
-              _buildMenuItem(Icons.history, 'Trips', () {
-                 // Navigate to Trips
-              }),
-              _buildMenuItem(Icons.location_on, 'Saved Places', () => _navigateTo(const SavedPlacesScreen())),
+              // 2. Wallet / Payment
+              _buildMenuItem(Icons.account_balance_wallet, 'Wallet / Payment', () => _navigateTo(const WalletScreen())),
+              // 3. Payment Methods
+              _buildMenuItem(Icons.payment, 'Payment Methods', () => _navigatePlaceholder('Payment Methods')),
+              // 13. Promotions / Offers
+              _buildMenuItem(Icons.local_offer, 'Promotions / Offers', () => _navigatePlaceholder('Promotions / Offers')),
             ]),
             const SizedBox(height: 16),
+            
+            // Rides & Places
             _buildMenuSection([
-              _buildMenuItem(Icons.settings, 'Settings', () => _navigateTo(const SettingsScreen())),
-              _buildMenuItem(Icons.shield, 'Safety', () => _navigateTo(const SafetyScreen())),
+              // 4. Trips / Ride History
+              _buildMenuItem(Icons.history, 'Trips / Ride History', () => _navigateTo(const ActivityScreen())),
+              // 5 & 6. Saved Places / Favorites
+              _buildMenuItem(Icons.location_on, 'Saved Places & Favorites', () => _navigateTo(const SavedPlacesScreen())),
+            ]),
+            const SizedBox(height: 16),
+            
+            // Safety & Support
+            _buildMenuSection([
+              // 9. Safety
+              _buildMenuItem(Icons.shield, 'Safety Center', () => _navigateTo(const SafetyScreen())),
+              // 10. Emergency Assistance / SOS
+              _buildMenuItem(Icons.sos, 'Emergency Assistance / SOS', () => _navigatePlaceholder('Emergency Assistance'), color: Colors.red),
+              // 12. Help & Support
               _buildMenuItem(Icons.help_outline, 'Help & Support', () => _navigateTo(const SupportScreen())),
             ]),
             const SizedBox(height: 16),
+            
+            // Settings & Security
+            _buildMenuSection([
+              // 11. Notifications
+              _buildMenuItem(Icons.notifications, 'Notifications', () => _navigateTo(const NotificationsScreen())),
+              // 7. Settings
+              _buildMenuItem(Icons.settings, 'Settings', () => _navigateTo(const SettingsScreen())),
+              // 8. Privacy & Security
+              _buildMenuItem(Icons.lock, 'Privacy & Security', () => _navigateTo(const PrivacySecurityScreen())),
+              // 14. About
+              _buildMenuItem(Icons.info_outline, 'About Shadhin Jatra', () => _navigateTo(const AboutScreen())),
+            ]),
+            const SizedBox(height: 16),
+
+            // 15. Logout
             _buildMenuSection([
               _buildMenuItem(Icons.logout, 'Logout', _logout, isDestructive: true),
             ]),
@@ -107,8 +146,8 @@ class _AccountDashboardState extends State<AccountDashboard> {
             CircleAvatar(
               radius: 40,
               backgroundColor: Colors.deepPurple.shade100,
-              backgroundImage: _avatarUrl != null ? NetworkImage(_avatarUrl!) : null,
-              child: _avatarUrl == null ? const Icon(Icons.person, size: 40, color: Colors.deepPurple) : null,
+              backgroundImage: _avatarUrl != null && _avatarUrl!.isNotEmpty ? NetworkImage(_avatarUrl!) : null,
+              child: (_avatarUrl == null || _avatarUrl!.isEmpty) ? const Icon(Icons.person, size: 40, color: Colors.deepPurple) : null,
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -147,10 +186,12 @@ class _AccountDashboardState extends State<AccountDashboard> {
     );
   }
 
-  Widget _buildMenuItem(IconData icon, String title, VoidCallback onTap, {bool isDestructive = false}) {
+  Widget _buildMenuItem(IconData icon, String title, VoidCallback onTap, {bool isDestructive = false, Color? color}) {
+    final itemColor = isDestructive ? Colors.red : (color ?? Colors.black87);
+    final iconColor = isDestructive ? Colors.red : (color ?? Colors.grey.shade800);
     return ListTile(
-      leading: Icon(icon, color: isDestructive ? Colors.red : Colors.grey.shade800),
-      title: Text(title, style: TextStyle(color: isDestructive ? Colors.red : Colors.black87, fontSize: 16, fontWeight: FontWeight.w500)),
+      leading: Icon(icon, color: iconColor),
+      title: Text(title, style: TextStyle(color: itemColor, fontSize: 16, fontWeight: FontWeight.w500)),
       trailing: const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
       onTap: onTap,
     );
@@ -160,7 +201,21 @@ class _AccountDashboardState extends State<AccountDashboard> {
     Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
   }
 
-  void _logout() {
-    // Implement secure logout
+  void _navigatePlaceholder(String title) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(
+      appBar: AppBar(title: Text(title), backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
+      body: Center(child: Text('$title is coming soon!', style: const TextStyle(fontSize: 18))),
+    )));
+  }
+
+  Future<void> _logout() async {
+    await AuthService.logout();
+    if (mounted) {
+       Navigator.pushAndRemoveUntil(
+         context, 
+         MaterialPageRoute(builder: (_) => const LoginScreen()), 
+         (route) => false
+       );
+    }
   }
 }

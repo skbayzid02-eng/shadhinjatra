@@ -30,12 +30,24 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/account', [\App\Http\Controllers\AccountController::class, 'deleteAccount']);
     Route::get('/account/notifications', [\App\Http\Controllers\AccountController::class, 'notifications']);
     Route::get('/about', [\App\Http\Controllers\AccountController::class, 'about']);
+    Route::get('/support', [\App\Http\Controllers\SupportController::class, 'index']);
+    Route::post('/support/ticket', [\App\Http\Controllers\SupportController::class, 'submitTicket']);
+    Route::get('/security', [\App\Http\Controllers\PrivacySecurityController::class, 'index']);
+    Route::post('/security/password', [\App\Http\Controllers\PrivacySecurityController::class, 'updatePassword']);
+    Route::put('/security/settings', [\App\Http\Controllers\PrivacySecurityController::class, 'updateSettings']);
+    Route::get('/account/places', [\App\Http\Controllers\SavedPlaceController::class, 'index']);
+    Route::post('/account/places', [\App\Http\Controllers\SavedPlaceController::class, 'store']);
+    Route::delete('/account/places/{id}', [\App\Http\Controllers\SavedPlaceController::class, 'destroy']);
     Route::post('/fcm-token', [\App\Http\Controllers\AuthController::class, 'updateFcmToken']);
     Route::post('/account/language', [\App\Http\Controllers\AuthController::class, 'updateLanguage']);
     Route::post('/rides', [\App\Http\Controllers\Api\RideRequestController::class, 'store']);
     Route::get('/rides/current', [\App\Http\Controllers\Api\RideController::class, 'current']);
     Route::post('/rides/{id}/simulate', [\App\Http\Controllers\Api\RideController::class, 'simulateDriver']);
     Route::post('/rides/{id}/rate', [\App\Http\Controllers\Api\RideController::class, 'rateRide']);
+    
+    // Universal Chat Endpoints for a specific ride
+    Route::get('/rides/{id}/chat', [\App\Http\Controllers\Api\RideChatController::class, 'index']);
+    Route::post('/rides/{id}/chat', [\App\Http\Controllers\Api\RideChatController::class, 'store']);
     
     // Driver API Routes
     Route::get('/driver/home', [\App\Http\Controllers\DriverHomeController::class, 'index']);

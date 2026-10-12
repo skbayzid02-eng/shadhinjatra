@@ -1,0 +1,205 @@
+import os
+
+# 1. Add fetchNotifications to auth_service.dart
+auth_service_path = r'D:\laragon\www\shadhinjatra\APP_SHADHINJATRA_USER\shadhinjatradriver\lib\services\auth_service.dart'
+with open(auth_service_path, 'r', encoding='utf-8') as f:
+    auth_content = f.read()
+
+fetch_notif = """
+  static Future<Map<String, dynamic>> fetchNotifications() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/account/notifications'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+}"""
+auth_content = auth_content.replace("\n}\n", fetch_notif)
+with open(auth_service_path, 'w', encoding='utf-8') as f:
+    f.write(auth_content)
+
+# 2. Create notifications_screen.dart
+notif_screen_dir = r'D:\laragon\www\shadhinjatra\APP_SHADHINJATRA_USER\shadhinjatradriver\lib\screens'
+if not os.path.exists(notif_screen_dir):
+    os.makedirs(notif_screen_dir)
+notif_screen_path = os.path.join(notif_screen_dir, 'notifications_screen.dart')
+
+notif_code = """import 'package:flutter/material.dart';
+import 'package:easy_localization/easy_localization.dart';
+import 'package:shadhinjatradriver/services/auth_service.dart';
+
+class NotificationsScreen extends StatefulWidget {
+  const NotificationsScreen({super.key});
+
+  @override
+  State<NotificationsScreen> createState() => _NotificationsScreenState();
+}
+
+class _NotificationsScreenState extends State<NotificationsScreen> {
+  bool _isLoading = true;
+  List<dynamic> _notifications = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotifications();
+  }
+
+  Future<void> _loadNotifications() async {
+    final result = await AuthService.fetchNotifications();
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        if (result['success'] == true) {
+          // Combine all groups into a single list
+          final data = result['data'] ?? {};
+          final rideAlerts = data['ride_alerts'] ?? [];
+          final offers = data['offers'] ?? [];
+          final system = data['system_updates'] ?? [];
+          
+          _notifications = [...rideAlerts, ...offers, ...system];
+          // Simple sort by id for dummy data
+          _notifications.sort((a, b) => b['id'].compareTo(a['id']));
+        }
+      });
+    }
+  }
+
+  IconData _getIconForType(String? type) {
+    switch (type) {
+      case 'success':
+        return Icons.check_circle;
+      case 'info':
+        return Icons.info;
+      case 'promo':
+        return Icons.local_offer;
+      case 'warning':
+        return Icons.warning;
+      default:
+        return Icons.notifications;
+    }
+  }
+
+  Color _getColorForType(String? type) {
+    switch (type) {
+      case 'success':
+        return Colors.green;
+      case 'info':
+        return Colors.blue;
+      case 'promo':
+        return Colors.orange;
+      case 'warning':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Notifications'),
+        backgroundColor: Colors.orange,
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _notifications.isEmpty
+              ? const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.notifications_off, size: 60, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text('No notifications yet', style: TextStyle(fontSize: 18, color: Colors.grey)),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: _notifications.length,
+                  itemBuilder: (context, index) {
+                    final notif = _notifications[index];
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.all(16),
+                        leading: CircleAvatar(
+                          backgroundColor: _getColorForType(notif['type']).withOpacity(0.1),
+                          child: Icon(
+                            _getIconForType(notif['type']),
+                            color: _getColorForType(notif['type']),
+                          ),
+                        ),
+                        title: Text(
+                          notif['title'] ?? '',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(notif['message'] ?? '', style: const TextStyle(fontSize: 14)),
+                              const SizedBox(height: 8),
+                              Text(
+                                notif['time'] ?? '',
+                                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
+}
+"""
+with open(notif_screen_path, 'w', encoding='utf-8') as f:
+    f.write(notif_code)
+
+# 3. Update home_screen.dart to import and route to NotificationsScreen
+home_screen_path = r'D:\laragon\www\shadhinjatra\APP_SHADHINJATRA_USER\shadhinjatradriver\lib\screens\home_screen.dart'
+with open(home_screen_path, 'r', encoding='utf-8') as f:
+    home_content = f.read()
+
+# Add import
+import_statement = "import 'package:shadhinjatradriver/screens/active_ride_screen.dart';"
+new_import_statement = "import 'package:shadhinjatradriver/screens/active_ride_screen.dart';\nimport 'package:shadhinjatradriver/screens/notifications_screen.dart';"
+home_content = home_content.replace(import_statement, new_import_statement)
+
+# Link bell icon
+old_bell_action = """          IconButton(
+            icon: const Icon(Icons.notifications),
+            onPressed: () {
+              // Future Notifications Integration
+            },
+          ),"""
+new_bell_action = """          IconButton(
+            icon: const Icon(Icons.notifications),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+            },
+          ),"""
+home_content = home_content.replace(old_bell_action, new_bell_action)
+
+with open(home_screen_path, 'w', encoding='utf-8') as f:
+    f.write(home_content)
+
+print("Notifications implemented.")

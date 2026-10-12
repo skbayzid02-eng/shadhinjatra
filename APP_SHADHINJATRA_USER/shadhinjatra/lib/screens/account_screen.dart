@@ -212,7 +212,7 @@ class _AccountScreenState extends State<AccountScreen> {
                     _buildDivider(),
                     _buildMenuItem(
                       icon: Icons.card_giftcard,
-                      title: 'Uber Cash / Credits',
+                      title: 'Shadhin Jatra Cash / Credits',
                       subtitle: _account?['uber_cash'] != null ? '৳${_account!['uber_cash']}' : null,
                       page: const WalletScreen(),
                     ),

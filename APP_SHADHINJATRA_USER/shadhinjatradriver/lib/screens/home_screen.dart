@@ -6,6 +6,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shadhinjatradriver/services/auth_service.dart';
 import 'package:shadhinjatradriver/screens/login_screen.dart';
 import 'package:shadhinjatradriver/screens/active_ride_screen.dart';
+import 'package:shadhinjatradriver/screens/notifications_screen.dart';
+import 'package:shadhinjatradriver/screens/earnings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,6 +21,13 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoading = true;
   String _errorMessage = '';
   
+  // Stats
+  int _selectedStatsDays = 1;
+  bool _isStatsLoading = false;
+  String _earningsDisplay = '0';
+  String _ridesDisplay = '0';
+  final List<int> _filterOptions = [1, 3, 7, 10, 15, 30];
+  
   bool _isOnline = false;
   Timer? _locationTimer;
   Timer? _durationTimer;
@@ -30,6 +39,21 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadData();
+    _loadStats();
+  }
+  
+  Future<void> _loadStats() async {
+    setState(() => _isStatsLoading = true);
+    final result = await AuthService.fetchEarnings(_selectedStatsDays);
+    if (mounted) {
+      setState(() {
+        _isStatsLoading = false;
+        if (result['success'] == true) {
+          _earningsDisplay = result['data']['total_earnings'].toString();
+          _ridesDisplay = result['data']['total_rides'].toString();
+        }
+      });
+    }
   }
 
   @override
@@ -179,16 +203,12 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: _buildDrawer(),
       appBar: AppBar(
         backgroundColor: Colors.orange,
         foregroundColor: Colors.white,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.menu),
-          onPressed: () {
-            // Future Account/Menu Integration
-          },
-        ),
+
         title: _homeData == null
             ? const Text('Loading...')
             : Row(
@@ -229,7 +249,7 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             icon: const Icon(Icons.notifications),
             onPressed: () {
-              // Future Notifications Integration
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
             },
           ),
         ],
@@ -334,14 +354,46 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 16),
 
-          // Stats Grid
-          Row(
-            children: [
-              Expanded(child: _buildStatCard('todays_earnings'.tr(), '৳${stats['todays_earnings']}', Icons.attach_money, Colors.green)),
-              const SizedBox(width: 16),
-              Expanded(child: _buildStatCard('total_rides'.tr(), '${stats['total_rides']}', Icons.directions_car, Colors.blue)),
-            ],
+          // Time Filter for Stats
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _filterOptions.map((days) {
+                final isSelected = _selectedStatsDays == days;
+                final name = days == 1 ? 'Today' : (days == 30 ? '1 Month' : '$days Days');
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: ChoiceChip(
+                    label: Text(name, style: TextStyle(
+                      color: isSelected ? Colors.white : Colors.black87,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal
+                    )),
+                    selected: isSelected,
+                    selectedColor: Colors.orange,
+                    backgroundColor: Colors.grey.shade200,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() => _selectedStatsDays = days);
+                        _loadStats();
+                      }
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
           ),
+          const SizedBox(height: 16),
+          
+          // Stats Grid
+          _isStatsLoading 
+            ? const Center(child: Padding(padding: EdgeInsets.all(16.0), child: CircularProgressIndicator())) 
+            : Row(
+                children: [
+                  Expanded(child: _buildStatCard('Earnings', '৳$_earningsDisplay', Icons.attach_money, Colors.green)),
+                  const SizedBox(width: 16),
+                  Expanded(child: _buildStatCard('Rides', _ridesDisplay, Icons.directions_car, Colors.blue)),
+                ],
+              ),
           const SizedBox(height: 16),
 
           // Active Requests (Only show if online)
@@ -392,6 +444,103 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildDrawer() {
+    final driver = _homeData?['driver'] ?? {};
+    final stats = _homeData?['stats'] ?? {};
+    
+    return Drawer(
+      child: Column(
+        children: [
+          UserAccountsDrawerHeader(
+            decoration: const BoxDecoration(
+              color: Colors.orange,
+            ),
+            accountName: Text(driver['name'] ?? 'Driver Name', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            accountEmail: Row(
+              children: [
+                Text(driver['phone'] ?? driver['email'] ?? 'Phone / Email'),
+                const SizedBox(width: 8),
+                const Icon(Icons.star, size: 14, color: Colors.amber),
+                const SizedBox(width: 2),
+                Text('${stats['rating'] ?? '5.0'}'),
+              ],
+            ),
+            currentAccountPicture: CircleAvatar(
+              backgroundColor: Colors.white,
+              backgroundImage: driver['avatar'] != null ? NetworkImage(driver['avatar']) : null,
+              child: driver['avatar'] == null ? const Icon(Icons.person, size: 40, color: Colors.orange) : null,
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.person, color: Colors.blueGrey),
+                  title: const Text('My Profile'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    // TODO: Navigate to Profile
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.history, color: Colors.blueGrey),
+                  title: const Text('Ride History'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    // TODO: Navigate to History
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.account_balance_wallet, color: Colors.green),
+                  title: const Text('Wallet / Earnings'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const EarningsScreen()));
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.directions_car, color: Colors.blueGrey),
+                  title: const Text('Vehicle Details'),
+                  onTap: () {
+                    Navigator.pop(context);
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.settings, color: Colors.blueGrey),
+                  title: const Text('Settings'),
+                  onTap: () {
+                    Navigator.pop(context);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.help_outline, color: Colors.blueGrey),
+                  title: const Text('Help & Support'),
+                  onTap: () {
+                    Navigator.pop(context);
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.logout, color: Colors.red),
+                  title: const Text('Logout', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _logout(context);
+                  },
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text('Version 1.0.0', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+          )
+        ],
+      ),
+    );
+  }
   Widget _buildStatCard(String title, String value, IconData icon, Color color) {
     return Card(
       elevation: 2,

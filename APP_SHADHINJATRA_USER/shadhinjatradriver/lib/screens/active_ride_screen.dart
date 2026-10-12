@@ -1,6 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:shadhinjatradriver/screens/chat/chat_room_screen.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:shadhinjatradriver/services/auth_service.dart';
+import 'package:shadhinjatradriver/screens/chat_screen.dart';
+import 'package:geolocator/geolocator.dart';
 
 class ActiveRideScreen extends StatefulWidget {
   final Map<String, dynamic> rideData;
@@ -15,6 +19,76 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   bool _hasArrived = false;
   int _waitingSeconds = 0;
   Timer? _waitingTimer;
+  
+  final MapController _mapController = MapController();
+  List<LatLng> _routePoints = [];
+  LatLng? _driverLocation;
+  LatLng? _destinationLocation;
+  bool _isLoadingMap = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _initMap();
+  }
+  
+  Future<void> _initMap() async {
+    try {
+      // Get current driver location (or fallback to Dhaka)
+      Position? position;
+      try {
+        position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      } catch (e) {
+        // Ignore if permission denied, fallback
+      }
+      
+      final req = widget.rideData;
+      // Default fallback
+      double dLat = position?.latitude ?? 23.8103;
+      double dLng = position?.longitude ?? 90.4125;
+      
+      // Target destination (pickup location if not arrived, dropoff if arrived)
+      double tLat = double.tryParse(req['pickup_lat']?.toString() ?? '23.8203') ?? 23.8203;
+      double tLng = double.tryParse(req['pickup_lng']?.toString() ?? '90.4225') ?? 90.4225;
+      
+      setState(() {
+        _driverLocation = LatLng(dLat, dLng);
+        _destinationLocation = LatLng(tLat, tLng);
+      });
+      
+      // Fetch route
+      final res = await AuthService.fetchRoute(dLat, dLng, tLat, tLng);
+      if (res['success'] == true && res['geometry'] != null) {
+        final List<dynamic> coords = res['geometry'];
+        final List<LatLng> points = coords.map((c) => LatLng(c[1], c[0])).toList();
+        
+        if (mounted) {
+          setState(() {
+            _routePoints = points;
+            _isLoadingMap = false;
+          });
+          
+          // Fit map bounds to show the whole route
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _fitMapBounds();
+          });
+        }
+      } else {
+        if (mounted) setState(() => _isLoadingMap = false);
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingMap = false);
+    }
+  }
+  
+  void _fitMapBounds() {
+    if (_routePoints.isEmpty) return;
+    final bounds = LatLngBounds.fromPoints(_routePoints);
+    _mapController.fitCamera(CameraFit.bounds(
+      bounds: bounds,
+      padding: const EdgeInsets.all(50),
+    ));
+  }
 
   void _markAsArrived() {
     setState(() {
@@ -26,6 +100,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         _waitingSeconds++;
       });
     });
+    
+    // Optionally: re-fetch route for Dropoff location here if needed
   }
 
   void _cancelRide() {
@@ -42,6 +118,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   @override
   void dispose() {
     _waitingTimer?.cancel();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -57,24 +134,74 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
       ),
       body: Column(
         children: [
-          // Simulated Map Area
+          // Map Area
           Expanded(
-            child: Container(
-              color: Colors.grey.shade200,
-              width: double.infinity,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  const Icon(Icons.map, size: 100, color: Colors.black12),
-                  Positioned(
-                    top: 20,
+            child: Stack(
+              children: [
+                if (_driverLocation != null)
+                  FlutterMap(
+                    mapController: _mapController,
+                    options: MapOptions(
+                      initialCenter: _driverLocation!,
+                      initialZoom: 14.0,
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'com.example.shadhinjatradriver',
+                      ),
+                      PolylineLayer(
+                        polylines: [
+                          if (_routePoints.isNotEmpty)
+                            Polyline(
+                              points: _routePoints,
+                              strokeWidth: 4.0,
+                              color: Colors.blueAccent,
+                            ),
+                        ],
+                      ),
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: _driverLocation!,
+                            width: 40,
+                            height: 40,
+                            child: const Icon(Icons.directions_car, color: Colors.blue, size: 40),
+                          ),
+                          if (_destinationLocation != null)
+                            Marker(
+                              point: _destinationLocation!,
+                              width: 40,
+                              height: 40,
+                              child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                            ),
+                        ],
+                      ),
+                    ],
+                  )
+                else
+                  const Center(child: CircularProgressIndicator()),
+                  
+                if (_isLoadingMap)
+                  Container(
+                    color: Colors.white54,
+                    child: const Center(child: CircularProgressIndicator(color: Colors.orange)),
+                  ),
+
+                Positioned(
+                  top: 20,
+                  left: 0,
+                  right: 0,
+                  child: Center(
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       decoration: BoxDecoration(
                         color: Colors.black87,
                         borderRadius: BorderRadius.circular(20),
+                        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
                       ),
                       child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(req['estimated_time'] ?? 'ETA', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
                           const SizedBox(width: 10),
@@ -83,8 +210,21 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+                
+                // Recenter Button
+                Positioned(
+                  bottom: 20,
+                  right: 16,
+                  child: FloatingActionButton(
+                    heroTag: 'recenter_map',
+                    mini: true,
+                    backgroundColor: Colors.white,
+                    child: const Icon(Icons.my_location, color: Colors.black87),
+                    onPressed: _fitMapBounds,
+                  ),
+                ),
+              ],
             ),
           ),
 
@@ -112,7 +252,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(req['passenger_name'] ?? 'Passenger', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          Text(req['passenger_name'] ?? 'Guest Passenger', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           if (req['passenger_phone'] != null)
                             Text(req['passenger_phone'], style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
                           Row(
@@ -139,9 +279,9 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => ChatRoomScreen(
-                              chatId: req['id'] ?? 1,
-                              passengerName: req['passenger_name'] ?? 'Passenger',
+                            builder: (context) => ChatScreen(
+                              rideId: req['id'] ?? 1,
+                              otherPersonName: req['passenger_name'] ?? 'Passenger',
                             ),
                           ),
                         );
@@ -157,7 +297,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                   children: [
                     const Icon(Icons.my_location, color: Colors.green),
                     const SizedBox(width: 12),
-                    Expanded(child: Text(req['pickup'] ?? '', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500))),
+                    Expanded(child: Text(req['pickup'] ?? 'Unknown Location', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500))),
                   ],
                 ),
                 

@@ -60,9 +60,21 @@ class _ActivityScreenState extends State<ActivityScreen> {
                             color: Colors.deepPurple,
                           ),
                         ),
-                        title: Text(activity['type'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text('${activity['date']} • ${activity['status']}'),
+                        title: Text('${activity['vehicle_type'] ?? activity['type']} • ${activity['status']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 4),
+                            Text('${activity['date']}'),
+                            if (activity['pickup'] != null && activity['dropoff'] != null) ...[
+                              const SizedBox(height: 4),
+                              Text('From: ${activity['pickup']}', style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              Text('To: ${activity['dropoff']}', style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ]
+                          ],
+                        ),
                         trailing: Text('৳${activity['fare']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        isThreeLine: activity['pickup'] != null,
                       ),
                     );
                   },

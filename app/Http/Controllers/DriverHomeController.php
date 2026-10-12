@@ -9,8 +9,12 @@ class DriverHomeController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
+        $hasOngoingRide = \App\Models\Ride::where('driver_id', $user->id)
+            ->where('status', 'ongoing')
+            ->exists();
+            
         $activeRequests = [];
-        if ($user->is_online) {
+        if ($user->is_online && !$hasOngoingRide) {
             $rides = \App\Models\Ride::with('passenger')
                         ->where('status', 'pending')
                         ->where('vehicle_type', $user->vehicle_type ?? 'Private Car')
@@ -34,6 +38,22 @@ class DriverHomeController extends Controller
             }
         }
 
+        $today = \Carbon\Carbon::today();
+        
+        $todaysEarnings = \App\Models\Ride::where('driver_id', $user->id)
+                            ->where('status', 'completed')
+                            ->whereDate('updated_at', $today)
+                            ->sum('fare_amount');
+                            
+        $totalRides = \App\Models\Ride::where('driver_id', $user->id)
+                        ->where('status', 'completed')
+                        ->count();
+                        
+        $rating = \App\Models\Ride::where('driver_id', $user->id)
+                    ->whereNotNull('rating')
+                    ->avg('rating');
+        $rating = $rating ? round($rating, 1) : 5.0;
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -44,9 +64,9 @@ class DriverHomeController extends Controller
                     'avatar' => $user->avatar ? asset('storage/' . $user->avatar) : null,
                 ],
                 'stats' => [
-                    'todays_earnings' => 1250,
-                    'total_rides' => 45,
-                    'rating' => 4.9,
+                    'todays_earnings' => $todaysEarnings,
+                    'total_rides' => $totalRides,
+                    'rating' => $rating,
                 ],
                 'active_requests' => $activeRequests
             ],
@@ -83,8 +103,12 @@ class DriverHomeController extends Controller
         $user->longitude = $request->longitude;
         $user->save();
 
+        $hasOngoingRide = \App\Models\Ride::where('driver_id', $user->id)
+            ->where('status', 'ongoing')
+            ->exists();
+
         $activeRequests = [];
-        if ($user->is_online) {
+        if ($user->is_online && !$hasOngoingRide) {
             $rides = \App\Models\Ride::with('passenger')
                         ->where('status', 'pending')
                         ->where('vehicle_type', $user->vehicle_type ?? 'Private Car')
@@ -123,7 +147,18 @@ class DriverHomeController extends Controller
         if (!$ride || $ride->status !== 'pending') {
             return response()->json([
                 'success' => false,
-                'message' => 'Ride is no longer available',
+                'message' => 'Ride is no longer available (accepted by someone else).',
+            ], 400);
+        }
+
+        $hasOngoingRide = \App\Models\Ride::where('driver_id', $request->user()->id)
+            ->where('status', 'ongoing')
+            ->exists();
+            
+        if ($hasOngoingRide) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You already have an ongoing ride. Please complete it first.',
             ], 400);
         }
 

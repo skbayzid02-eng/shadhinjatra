@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shadhinjatradriver/services/auth_service.dart';
 import 'package:shadhinjatradriver/screens/login_screen.dart';
-import 'package:shadhinjatradriver/screens/home_screen.dart';
 import 'package:shadhinjatradriver/screens/main_navigation.dart';
 
 import 'package:firebase_core/firebase_core.dart';

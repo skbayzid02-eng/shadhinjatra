@@ -10,18 +10,56 @@ class DriverDashboardController extends Controller
     {
         $user = $request->user();
         
-        // Mock data for now
+        $days = (int) $request->query('days', 30);
+        if (!in_array($days, [1, 3, 7, 10, 15, 30])) {
+            $days = 30;
+        }
+
+        $startDate = \Carbon\Carbon::today()->subDays($days - 1);
+        
+        $rides = \App\Models\Ride::where('driver_id', $user->id)
+                    ->where('status', 'completed')
+                    ->whereDate('updated_at', '>=', $startDate)
+                    ->orderBy('updated_at', 'desc')
+                    ->get();
+                    
+        $dailyStats = [];
+        $totalEarnings = 0;
+        $totalRides = 0;
+        
+        // Initialize all days with 0
+        for ($i = 0; $i < $days; $i++) {
+            $dateStr = \Carbon\Carbon::today()->subDays($i)->format('Y-m-d');
+            $dailyStats[$dateStr] = [
+                'date' => $dateStr,
+                'display_date' => \Carbon\Carbon::today()->subDays($i)->format('d M'),
+                'rides_count' => 0,
+                'earnings' => 0
+            ];
+        }
+
+        foreach ($rides as $ride) {
+            $dateStr = $ride->updated_at->format('Y-m-d');
+            if (isset($dailyStats[$dateStr])) {
+                $dailyStats[$dateStr]['rides_count']++;
+                $dailyStats[$dateStr]['earnings'] += $ride->fare_amount;
+                
+                $totalEarnings += $ride->fare_amount;
+                $totalRides++;
+            }
+        }
+        
+        // Convert to indexed array
+        $dailyStatsList = array_values($dailyStats);
+
         return response()->json([
             'success' => true,
             'data' => [
-                'balance' => 1250.50,
-                'today_earnings' => 450.00,
-                'this_week_earnings' => 3200.00,
-                'transactions' => [
-                    ['id' => 1, 'date' => 'Today, 2:30 PM', 'type' => 'Ride Fare', 'amount' => '+৳250'],
-                    ['id' => 2, 'date' => 'Today, 10:15 AM', 'type' => 'Ride Fare', 'amount' => '+৳200'],
-                    ['id' => 3, 'date' => 'Yesterday', 'type' => 'Withdrawal', 'amount' => '-৳1000'],
-                ]
+                'period_days' => $days,
+                'total_earnings' => $totalEarnings,
+                'total_rides' => $totalRides,
+                'daily_stats' => $dailyStatsList,
+                'balance' => $totalEarnings, // Just a placeholder for wallet balance
             ],
             'message' => 'Earnings fetched successfully'
         ]);

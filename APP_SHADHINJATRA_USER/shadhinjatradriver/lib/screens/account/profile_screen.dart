@@ -74,7 +74,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
-      appBar: AppBar(title: Text('profile'.tr(fallback: 'My Profile')), backgroundColor: Colors.orange, foregroundColor: Colors.white, elevation: 0),
+      appBar: AppBar(title: Text('My Profile'.tr()), backgroundColor: Colors.orange, foregroundColor: Colors.white, elevation: 0),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _accountData == null
