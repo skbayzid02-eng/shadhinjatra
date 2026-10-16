@@ -29,6 +29,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/account/settings', [\App\Http\Controllers\AccountController::class, 'updateSettings']);
     Route::delete('/account', [\App\Http\Controllers\AccountController::class, 'deleteAccount']);
     Route::get('/account/notifications', [\App\Http\Controllers\AccountController::class, 'notifications']);
+    Route::post('/account/notifications/mark-read', [\App\Http\Controllers\AccountController::class, 'markNotificationsRead']);
+    Route::post('/account/notifications/{id}/read', [\App\Http\Controllers\AccountController::class, 'markSingleNotificationRead']);
     Route::get('/about', [\App\Http\Controllers\AccountController::class, 'about']);
     Route::get('/support', [\App\Http\Controllers\SupportController::class, 'index']);
     Route::post('/support/ticket', [\App\Http\Controllers\SupportController::class, 'submitTicket']);
@@ -42,6 +44,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/account/language', [\App\Http\Controllers\AuthController::class, 'updateLanguage']);
     Route::post('/rides', [\App\Http\Controllers\Api\RideRequestController::class, 'store']);
     Route::get('/rides/current', [\App\Http\Controllers\Api\RideController::class, 'current']);
+    Route::post('/rides/{id}/cancel', [\App\Http\Controllers\Api\RideController::class, 'cancel']);
     Route::post('/rides/{id}/simulate', [\App\Http\Controllers\Api\RideController::class, 'simulateDriver']);
     Route::post('/rides/{id}/rate', [\App\Http\Controllers\Api\RideController::class, 'rateRide']);
     
@@ -54,6 +57,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/driver/status', [\App\Http\Controllers\DriverHomeController::class, 'updateStatus']);
     Route::post('/driver/location', [\App\Http\Controllers\DriverHomeController::class, 'updateLocation']);
     Route::post('/driver/ride/{id}/accept', [\App\Http\Controllers\DriverHomeController::class, 'acceptRide']);
+    Route::post('/driver/ride/{id}/reject', [\App\Http\Controllers\DriverHomeController::class, 'rejectRide']);
+    
+    // Driver Notification Endpoints
+    Route::get('/driver/notifications', [\App\Http\Controllers\DriverNotificationController::class, 'index']);
+    Route::post('/driver/notifications/{id}/read', [\App\Http\Controllers\DriverNotificationController::class, 'markAsRead']);
+    Route::post('/driver/notifications/mark-read', [\App\Http\Controllers\DriverNotificationController::class, 'markAllAsRead']);
     
     // Driver Navigation Endpoints
     Route::get('/driver/earnings', [\App\Http\Controllers\DriverDashboardController::class, 'earnings']);

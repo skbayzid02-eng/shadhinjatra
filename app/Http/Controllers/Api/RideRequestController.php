@@ -43,6 +43,52 @@ class RideRequestController extends Controller
             'otp' => (string) rand(100000, 999999),
         ]);
 
+        // Create in-app notification for passenger
+        \App\Models\Notification::create([
+            'user_id' => $request->user()->id,
+            'ride_id' => $ride->id,
+            'title' => 'Ride Requested',
+            'message' => "Your ride request for {$ride->vehicle_type} has been placed. Waiting for a driver to accept.",
+            'type' => 'ride_request',
+            'data' => [
+                'ride_id' => $ride->id,
+                'pickup' => $ride->pickup_location,
+                'dropoff' => $ride->dropoff_location,
+                'vehicle_type' => $ride->vehicle_type,
+                'fare' => $ride->fare_amount,
+            ],
+            'is_read' => false,
+        ]);
+
+        // Create in-app notifications for drivers
+        $drivers = \App\Models\User::whereNotNull('vehicle_type')
+            ->where('id', '!=', $request->user()->id)
+            ->get();
+
+        if ($drivers->isEmpty()) {
+            $drivers = \App\Models\User::where('id', '!=', $request->user()->id)->get();
+        }
+
+        foreach ($drivers as $driver) {
+            \App\Models\Notification::create([
+                'user_id' => $driver->id,
+                'ride_id' => $ride->id,
+                'title' => 'নতুন রাইড রিকোয়েস্ট (New Ride Request)',
+                'message' => ($request->user()->name ?? 'যাত্রী') . " একটি {$ride->vehicle_type} বুকিং রিকোয়েস্ট করেছেন। ভাড়া: ৳{$ride->fare_amount}",
+                'type' => 'ride_request',
+                'data' => [
+                    'ride_id' => $ride->id,
+                    'passenger_name' => $request->user()->name ?? 'Guest Passenger',
+                    'passenger_phone' => $request->user()->phone ?? '',
+                    'pickup' => $ride->pickup_location,
+                    'dropoff' => $ride->dropoff_location,
+                    'vehicle_type' => $ride->vehicle_type,
+                    'fare' => $ride->fare_amount,
+                ],
+                'is_read' => false,
+            ]);
+        }
+
         // Broadcast to drivers
         \App\Events\RideRequested::dispatch($ride);
 

@@ -12,12 +12,12 @@ class AuthService {
     }
     try {
       if (Platform.isAndroid) {
-        return 'http://10.0.2.2:8000/api';
+        return 'http://192.168.0.7:8000/api';
       }
     } catch (e) {
       // Platform.is... throws on web, but we caught web above.
     }
-    return 'http://127.0.0.1:8000/api';
+    return 'http://192.168.0.7:8000/api';
   }
 
   static Future<Map<String, String>> getHeaders() async {
@@ -187,6 +187,27 @@ class AuthService {
     }
   }
 
+  static Future<Map<String, dynamic>> rejectRide(int rideId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/ride/$rideId/reject'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      );
+
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
   static Future<Map<String, dynamic>> uploadAvatar(XFile image) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
@@ -289,7 +310,45 @@ class AuthService {
 
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/account/notifications'),
+        Uri.parse('$baseUrl/driver/notifications'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> markNotificationAsRead(int id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/notifications/$id/read'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> markAllNotificationsAsRead() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/notifications/mark-read'),
         headers: {
           'Authorization': 'Bearer $token',
           'Accept': 'application/json',

@@ -12,18 +12,21 @@ class AuthService {
     }
     try {
       if (Platform.isAndroid) {
-        return 'http://10.0.2.2:8000/api';
+        return 'http://192.168.0.7:8000/api';
       }
     } catch (e) {
       // Catch Platform exceptions
     }
-    return 'http://127.0.0.1:8000/api';
+    return 'http://192.168.0.7:8000/api';
   }
 
   static String fixImageUrl(String? url) {
     if (url == null || url.isEmpty) return '';
     final String host = baseUrl.replaceAll('/api', '');
-    return url.replaceAll('http://localhost:8000', host).replaceAll('http://127.0.0.1:8000', host);
+    return url
+        .replaceAll('http://localhost:8000', host)
+        .replaceAll('http://127.0.0.1:8000', host)
+        .replaceAll('http://10.0.2.2:8000', host);
   }
 
   static Future<Map<String, String>> getHeaders() async {
@@ -147,6 +150,34 @@ class AuthService {
 
   static Future<Map<String, dynamic>> fetchNotifications() async {
     return _fetchData('account/notifications');
+  }
+
+  static Future<Map<String, dynamic>> markAllNotificationsRead() async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/account/notifications/mark-read'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> markNotificationRead(dynamic id) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/account/notifications/$id/read'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
   }
 
   static Future<Map<String, dynamic>> fetchAboutData() async {

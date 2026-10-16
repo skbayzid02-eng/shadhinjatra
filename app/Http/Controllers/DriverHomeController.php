@@ -14,10 +14,11 @@ class DriverHomeController extends Controller
             ->exists();
             
         $activeRequests = [];
-        if ($user->is_online && !$hasOngoingRide) {
+        if (!$hasOngoingRide) {
+            $vehicleTypes = $this->getCompatibleVehicleTypes($user->vehicle_type);
             $rides = \App\Models\Ride::with('passenger')
                         ->where('status', 'pending')
-                        ->where('vehicle_type', $user->vehicle_type ?? 'Private Car')
+                        ->whereIn('vehicle_type', $vehicleTypes)
                         ->orderBy('created_at', 'desc')
                         ->get();
             foreach($rides as $ride) {
@@ -25,15 +26,17 @@ class DriverHomeController extends Controller
                     'id' => $ride->id,
                     'passenger_name' => $ride->passenger->name ?? 'Guest Passenger',
                     'passenger_phone' => $ride->passenger->phone ?? null,
+                    'passenger_avatar' => $ride->passenger?->avatar ? asset('storage/' . $ride->passenger->avatar) : null,
                     'passenger_rating' => 5.0,
                     'pickup' => $ride->pickup_location,
                     'dropoff' => $ride->dropoff_location,
-                    'distance' => $ride->distance_km . ' km',
+                    'distance' => ($ride->distance_km ?? 0) . ' km',
                     'estimated_time' => '15 mins',
                     'fare' => '৳' . $ride->fare_amount,
                     'vehicle_type' => $ride->vehicle_type,
                     'payment_method' => ucfirst($ride->payment_method),
-                    'expires_in' => 30,
+                    'time_ago' => $ride->created_at ? $ride->created_at->diffForHumans() : 'Just now',
+                    'expires_in' => 120,
                 ];
             }
         }
@@ -68,7 +71,8 @@ class DriverHomeController extends Controller
                     'total_rides' => $totalRides,
                     'rating' => $rating,
                 ],
-                'active_requests' => $activeRequests
+                'active_requests' => $activeRequests,
+                'unread_notifications_count' => \App\Models\Notification::where('user_id', $user->id)->where('is_read', false)->count(),
             ],
             'message' => 'Driver home data fetched successfully',
         ]);
@@ -109,9 +113,10 @@ class DriverHomeController extends Controller
 
         $activeRequests = [];
         if ($user->is_online && !$hasOngoingRide) {
+            $vehicleTypes = $this->getCompatibleVehicleTypes($user->vehicle_type);
             $rides = \App\Models\Ride::with('passenger')
                         ->where('status', 'pending')
-                        ->where('vehicle_type', $user->vehicle_type ?? 'Private Car')
+                        ->whereIn('vehicle_type', $vehicleTypes)
                         ->orderBy('created_at', 'desc')
                         ->get();
                         
@@ -166,6 +171,24 @@ class DriverHomeController extends Controller
         $ride->driver_id = $request->user()->id;
         $ride->save();
 
+        // Save In-App Notification for Passenger
+        \App\Models\Notification::create([
+            'user_id' => $ride->user_id,
+            'ride_id' => $ride->id,
+            'title' => 'Ride Confirmed',
+            'message' => ($request->user()->name ?? 'Driver') . ' has accepted your ride and is on the way.',
+            'type' => 'ride_confirmed',
+            'data' => [
+                'ride_id' => $ride->id,
+                'driver_name' => $request->user()->name ?? 'Driver',
+                'driver_phone' => $request->user()->phone ?? '',
+                'pickup' => $ride->pickup_location,
+                'dropoff' => $ride->dropoff_location,
+                'fare' => $ride->fare_amount,
+            ],
+            'is_read' => false,
+        ]);
+
         // Send Push Notification to Passenger
         if ($ride->passenger && $ride->passenger->fcm_token) {
             \App\Services\FcmService::send(
@@ -184,5 +207,18 @@ class DriverHomeController extends Controller
                 'status' => 'ongoing'
             ]
         ]);
+    }
+
+    public function rejectRide(Request $request, $id)
+    {
+        return response()->json([
+            'success' => true,
+            'message' => 'Ride request rejected successfully',
+        ]);
+    }
+
+    protected function getCompatibleVehicleTypes(?string $driverVehicleType): array
+    {
+        return ['Car', 'Private Car', 'Bike', 'Motorcycle', 'CNG', 'Auto', 'Rickshaw', 'Easy Bike', 'Microbus'];
     }
 }

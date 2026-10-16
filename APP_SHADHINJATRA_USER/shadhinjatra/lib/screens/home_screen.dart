@@ -47,12 +47,17 @@ class _HomeScreenState extends State<HomeScreen> {
     {'name': 'Microbus', 'icon': 'airport_shuttle', 'base_fare': 100.0, 'per_km_rate': 25.0, 'per_min_rate': 3.0, 'min_fare': 150.0, 'capacity': '7-12 pass'},
   ];
   bool _isRideRequested = false;
+  int? _currentRideId;
+  int _unreadNotificationsCount = 0;
+  Timer? _notificationPollTimer;
 
   @override
   void initState() {
     super.initState();
     _getUserLocation();
     _fetchUserName();
+    _fetchNotificationsCount();
+    _startNotificationPolling();
   }
 
   Future<void> _fetchUserName() async {
@@ -60,6 +65,27 @@ class _HomeScreenState extends State<HomeScreen> {
     if (data['success'] == true) {
       if (mounted) setState(() => _userName = data['data']['name']?.split(' ')[0] ?? '');
     }
+  }
+
+  Future<void> _fetchNotificationsCount() async {
+    try {
+      final res = await AuthService.fetchNotifications();
+      if (res['success'] == true && mounted) {
+        final count = res['unread_count'] ?? res['data']?['unread_count'] ?? 0;
+        setState(() {
+          _unreadNotificationsCount = (count is int) ? count : int.tryParse(count.toString()) ?? 0;
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _startNotificationPolling() {
+    _notificationPollTimer?.cancel();
+    _notificationPollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (mounted) {
+        _fetchNotificationsCount();
+      }
+    });
   }
 
   Future<Iterable<Map<String, dynamic>>> _searchLocation(String query) async {
@@ -199,16 +225,28 @@ class _HomeScreenState extends State<HomeScreen> {
       final data = jsonDecode(response.body);
       if (response.statusCode == 201 || data['success'] == true) {
         if (mounted) {
-          setState(() => _isRideRequested = true);
+          setState(() {
+            _isRideRequested = true;
+            _currentRideId = data['data']?['id'];
+          });
+          _fetchNotificationsCount();
           _startPollingRideStatus();
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['message'] ?? 'Failed to book ride')));
+        if (mounted) {
+          setState(() => _isRideRequested = false);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['message'] ?? 'Failed to book ride')));
+        }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error booking ride')));
+      if (mounted) {
+        setState(() => _isRideRequested = false);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error booking ride')));
+      }
     } finally {
-      setState(() => _isBooking = false);
+      if (mounted) {
+        setState(() => _isBooking = false);
+      }
     }
   }
 
@@ -226,16 +264,20 @@ class _HomeScreenState extends State<HomeScreen> {
         );
         final data = jsonDecode(response.body);
         if (response.statusCode == 200 && data['success'] == true) {
-          final status = data['data']['status'];
+          final ride = data['data'];
+          final status = ride['status'];
           if (status == 'ongoing' || status == 'accepted') {
             timer.cancel();
             if (mounted) {
               setState(() => _isRideRequested = false);
+              _fetchNotificationsCount();
               
               showDialog(
                 context: context,
                 barrierDismissible: true,
                 builder: (BuildContext context) {
+                  final driverName = ride['driver_name'] ?? 'Driver';
+                  final driverPhone = ride['driver_phone'] ?? '';
                   return AlertDialog(
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                     content: Column(
@@ -249,7 +291,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 20),
                         const Text('Ride Confirmed!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 12),
-                        const Text('A driver is on the way.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.black54)),
+                        Text(
+                          'Driver: $driverName has accepted your ride and is on the way.${driverPhone.isNotEmpty ? '\nContact: $driverPhone' : ''}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 16, color: Colors.black54),
+                        ),
                         const SizedBox(height: 24),
                         SizedBox(
                           width: double.infinity,
@@ -261,7 +307,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                             onPressed: () => Navigator.pop(context),
-                            child: const Text('View Status'),
+                            child: const Text('OK'),
                           ),
                         )
                       ],
@@ -281,6 +327,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _statusTimer?.cancel();
+    _notificationPollTimer?.cancel();
     super.dispose();
   }
 
@@ -380,8 +427,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   }
                 ),
                 _buildFloatingIcon(
-                  icon: Icons.notifications_none_rounded,
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen())),
+                  icon: _unreadNotificationsCount > 0 ? Icons.notifications_active : Icons.notifications_none_rounded,
+                  badgeCount: _unreadNotificationsCount,
+                  onTap: () async {
+                    await Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+                    _fetchNotificationsCount();
+                  },
                 )
               ],
             ),
@@ -498,17 +549,63 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildFloatingIcon({required IconData icon, required VoidCallback onTap}) {
+  Widget _buildFloatingIcon({
+    required IconData icon,
+    required VoidCallback onTap,
+    int badgeCount = 0,
+  }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 4))],
-        ),
-        child: Icon(icon, color: Colors.black87, size: 24),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Icon(
+              icon,
+              color: badgeCount > 0 ? const Color(0xFFFF9800) : Colors.black87,
+              size: 24,
+            ),
+          ),
+          if (badgeCount > 0)
+            Positioned(
+              right: -2,
+              top: -2,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                constraints: const BoxConstraints(
+                  minWidth: 18,
+                  minHeight: 18,
+                ),
+                child: Center(
+                  child: Text(
+                    badgeCount > 9 ? '9+' : '$badgeCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -807,28 +904,55 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(
             width: double.infinity,
             height: 4,
-            child: LinearProgressIndicator(color: Colors.black, backgroundColor: Colors.black12),
-          ),
-          const SizedBox(height: 32),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.05),
-              shape: BoxShape.circle,
+            child: LinearProgressIndicator(
+              color: Colors.green,
+              backgroundColor: Color(0xFFE8F5E9),
             ),
-            child: const Icon(Icons.radar, size: 60, color: Colors.black),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 28),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F5E9),
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFF81C784), width: 2.5),
+            ),
+            child: const Icon(
+              Icons.check_circle_rounded,
+              size: 68,
+              color: Color(0xFF2E7D32),
+            ),
+          ),
+          const SizedBox(height: 20),
           const Text(
-            'Finding your ride...',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5),
+            'Successful',
+            style: TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFF2E7D32),
+              letterSpacing: -0.5,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Sending request to nearby $_selectedVehicle drivers',
-            style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w500),
+            'Request sent to nearby $_selectedVehicle drivers',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.black87,
+              fontWeight: FontWeight.w600,
+              fontSize: 15,
+            ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 4),
+          const Text(
+            'Waiting for driver to accept...',
+            style: TextStyle(
+              color: Colors.black54,
+              fontWeight: FontWeight.w500,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 28),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
@@ -838,8 +962,26 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 18),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
-              onPressed: () {
-                setState(() => _isRideRequested = false);
+              onPressed: () async {
+                _statusTimer?.cancel();
+                if (_currentRideId != null) {
+                  final prefs = await SharedPreferences.getInstance();
+                  final token = prefs.getString('auth_token');
+                  try {
+                    await http.post(
+                      Uri.parse('${AuthService.baseUrl}/rides/$_currentRideId/cancel'),
+                      headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'},
+                    );
+                  } catch (e) {
+                    // silently catch
+                  }
+                }
+                if (mounted) {
+                  setState(() {
+                    _isRideRequested = false;
+                    _currentRideId = null;
+                  });
+                }
               },
               child: const Text('Cancel Request', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
             ),

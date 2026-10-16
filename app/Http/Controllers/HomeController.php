@@ -22,6 +22,7 @@ class HomeController extends Controller
                     'completed_journeys' => 12,
                     'upcoming_bookings' => 2,
                 ],
+                'unread_notifications_count' => \App\Models\Notification::where('user_id', $user->id)->where('is_read', false)->count(),
                 'recent_notifications' => [
                     ['id' => 1, 'title' => 'Welcome to Shadhin Jatra!', 'time' => '1 hour ago'],
                     ['id' => 2, 'title' => 'Your trip to Cox\'s Bazar is confirmed.', 'time' => '1 day ago'],

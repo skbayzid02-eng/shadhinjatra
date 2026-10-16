@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:shadhinjatradriver/services/auth_service.dart';
 import 'package:shadhinjatradriver/screens/login_screen.dart';
 import 'package:shadhinjatradriver/screens/active_ride_screen.dart';
@@ -31,15 +30,28 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isOnline = false;
   Timer? _locationTimer;
   Timer? _durationTimer;
+  Timer? _requestsPollingTimer;
+  final Set<int> _rejectedRideIds = {};
   int _onlineDurationSeconds = 0;
   Position? _currentPosition;
   List<dynamic> activeRequests = [];
+  int _unreadNotificationsCount = 0;
 
   @override
   void initState() {
     super.initState();
     _loadData();
     _loadStats();
+    _startRequestsPolling();
+  }
+
+  void _startRequestsPolling() {
+    _requestsPollingTimer?.cancel();
+    _requestsPollingTimer = Timer.periodic(const Duration(seconds: 4), (timer) {
+      if (mounted) {
+        _loadData(silent: true);
+      }
+    });
   }
   
   Future<void> _loadStats() async {
@@ -58,19 +70,28 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _requestsPollingTimer?.cancel();
     _goOffline(); // Ensure we stop tracking when leaving
     super.dispose();
   }
 
-  Future<void> _loadData() async {
+  Future<void> _loadData({bool silent = false}) async {
+    if (!silent) {
+      setState(() => _isLoading = true);
+    }
     final result = await AuthService.fetchDriverHomeData();
     if (mounted) {
       setState(() {
         _isLoading = false;
         if (result['success'] == true) {
           _homeData = result['data'];
-          activeRequests = _homeData!['active_requests'] ?? [];
-        } else {
+          _unreadNotificationsCount = _homeData!['unread_notifications_count'] ?? 0;
+          if (_homeData!['driver'] != null && _homeData!['driver']['status'] == 'online') {
+            _isOnline = true;
+          }
+          final List<dynamic> fetched = _homeData!['active_requests'] ?? [];
+          activeRequests = fetched.where((req) => !_rejectedRideIds.contains(req['id'])).toList();
+        } else if (!silent) {
           _errorMessage = result['message'] ?? 'Failed to load dashboard';
         }
       });
@@ -138,21 +159,32 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     });
 
+    // Fast Requests Polling Timer (Every 3 seconds)
+    _requestsPollingTimer?.cancel();
+    _requestsPollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (_isOnline) {
+        _loadData(silent: true);
+      }
+    });
+
     // Start Location Timer (Every 10 seconds)
     _locationTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       _updateLocation();
     });
 
-    // Initial Location Update
+    // Initial Load & Location Update
+    _loadData();
     _updateLocation();
   }
 
   void _goOffline() async {
     _durationTimer?.cancel();
     _locationTimer?.cancel();
+    _requestsPollingTimer?.cancel();
     
     setState(() {
       _isOnline = false;
+      activeRequests.clear();
     });
 
     // Notify Server
@@ -171,8 +203,9 @@ class _HomeScreenState extends State<HomeScreen> {
       
       if (res != null && res['success'] == true && res['active_requests'] != null) {
         if (mounted) {
+          final List<dynamic> fetched = res['active_requests'] ?? [];
           setState(() {
-            activeRequests = res['active_requests'] ?? [];
+            activeRequests = fetched.where((req) => !_rejectedRideIds.contains(req['id'])).toList();
           });
         }
       }
@@ -246,12 +279,47 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications),
-            onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
-            },
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_rounded, size: 26),
+                onPressed: () async {
+                  await Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+                  _loadData(silent: true);
+                },
+              ),
+              if (_unreadNotificationsCount > 0)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.white, width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.2),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                      child: Text(
+                        _unreadNotificationsCount > 9 ? '9+' : '$_unreadNotificationsCount',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: _isLoading
@@ -396,49 +464,123 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
           const SizedBox(height: 16),
 
-          // Active Requests (Only show if online)
-          if (_isOnline) ...[
-            Text('nearby_ride_requests'.tr(), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            if (activeRequests.isEmpty)
-              Text('no_active_requests'.tr())
-            else
-              ...activeRequests.map((req) => RideRequestCard(
-                requestData: req,
-                onAccept: () async {
-                  final result = await AuthService.acceptRide(req['id']);
-                  if (result['success'] == true) {
-                    if (context.mounted) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => ActiveRideScreen(rideData: req)),
-                      ).then((_) {
-                        setState(() {
-                          activeRequests.remove(req);
-                        });
-                      });
-                    }
-                  } else {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message'] ?? 'Error')));
-                    }
-                  }
-                },
-                onReject: () {
-                  // Implement actual reject logic here
-                  setState(() {
-                    activeRequests.remove(req);
-                  });
-                },
-              )).toList(),
-          ] else ...[
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24.0),
-                child: Text('Go Online to receive ride requests.', style: TextStyle(fontSize: 16, color: Colors.grey)),
+          // Active Requests Section (Always Visible)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade100,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.near_me_rounded, color: Colors.deepOrange, size: 20),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'nearby_ride_requests'.tr(),
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+                  ),
+                ],
+              ),
+              if (activeRequests.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.green.shade300),
+                  ),
+                  child: Text(
+                    '${activeRequests.length} ${activeRequests.length == 1 ? 'Request' : 'Requests'}',
+                    style: TextStyle(color: Colors.green.shade800, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          if (activeRequests.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.grey.shade200),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.directions_car_outlined, size: 38, color: Colors.orange.shade400),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'No active requests right now',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _isOnline
+                        ? 'Searching for passenger requests nearby...'
+                        : 'Go Online to accept incoming ride bookings.',
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             )
-          ]
+          else
+            ...activeRequests.map((req) => RideRequestCard(
+              requestData: req,
+              onAccept: () async {
+                final result = await AuthService.acceptRide(req['id']);
+                if (result['success'] == true) {
+                  if (context.mounted) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => ActiveRideScreen(rideData: req)),
+                    ).then((_) {
+                      setState(() {
+                        activeRequests.remove(req);
+                      });
+                      _loadData(silent: true);
+                    });
+                  }
+                } else {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message'] ?? 'Error')));
+                  }
+                }
+              },
+              onReject: () {
+                AuthService.rejectRide(req['id']);
+                setState(() {
+                  _rejectedRideIds.add(req['id']);
+                  activeRequests.remove(req);
+                });
+              },
+            )),
         ],
       ),
     );
@@ -598,7 +740,6 @@ class _RideRequestCardState extends State<RideRequestCard> {
           _timeLeft--;
         } else {
           timer.cancel();
-          widget.onReject(); // Auto-reject when time is up
         }
       });
     });
@@ -642,11 +783,17 @@ class _RideRequestCardState extends State<RideRequestCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(req['passenger_name'] ?? 'Passenger', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        if (req['passenger_phone'] != null && (req['passenger_phone'] as String).isNotEmpty)
+                          Text('📞 ${req['passenger_phone']}', style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
                         Row(
                           children: [
-                            const Icon(Icons.star, color: Colors.amber, size: 16),
+                            const Icon(Icons.star, color: Colors.amber, size: 14),
                             const SizedBox(width: 4),
-                            Text('${req['passenger_rating'] ?? 5.0}'),
+                            Text('${req['passenger_rating'] ?? 5.0}', style: const TextStyle(fontSize: 12)),
+                            if (req['time_ago'] != null) ...[
+                              const SizedBox(width: 8),
+                              Text('• ${req['time_ago']}', style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                            ],
                           ],
                         ),
                       ],
@@ -673,27 +820,54 @@ class _RideRequestCardState extends State<RideRequestCard> {
             padding: const EdgeInsets.all(16.0),
             child: Column(
               children: [
-                // Locations
+                // Pickup Location
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.my_location, color: Colors.green),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 2.0),
+                      child: Icon(Icons.my_location, color: Colors.green, size: 20),
+                    ),
                     const SizedBox(width: 12),
-                    Expanded(child: Text(req['pickup'] ?? '', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500))),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('PICKUP', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green)),
+                          const SizedBox(height: 2),
+                          Text(req['pickup'] ?? '', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
                 Padding(
-                  padding: const EdgeInsets.only(left: 11.0, top: 4, bottom: 4),
-                  child: Container(width: 2, height: 20, color: Colors.grey.shade300),
+                  padding: const EdgeInsets.only(left: 9.0, top: 4, bottom: 4),
+                  child: Container(width: 2, height: 18, color: Colors.grey.shade300),
                 ),
+                // Dropoff / Destination Location
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.location_on, color: Colors.red),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 2.0),
+                      child: Icon(Icons.location_on, color: Colors.red, size: 20),
+                    ),
                     const SizedBox(width: 12),
-                    Expanded(child: Text(req['dropoff'] ?? '', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500))),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('DESTINATION (DROPOFF)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.red)),
+                          const SizedBox(height: 2),
+                          Text(req['dropoff'] ?? '', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
                 
-                const Divider(height: 32),
+                const Divider(height: 28),
                 
                 // Details Grid
                 Row(

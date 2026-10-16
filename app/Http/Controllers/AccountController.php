@@ -151,26 +151,86 @@ class AccountController extends Controller
 
     public function notifications(Request $request)
     {
-        // For demonstration, return dummy grouped notifications
+        $user = $request->user();
+
+        $notifications = \App\Models\Notification::where('user_id', $user->id)
+            ->latest()
+            ->take(50)
+            ->get();
+
+        $unreadCount = \App\Models\Notification::where('user_id', $user->id)
+            ->where('is_read', false)
+            ->count();
+
+        $formatted = $notifications->map(function ($notif) {
+            return [
+                'id' => $notif->id,
+                'title' => $notif->title,
+                'message' => $notif->message,
+                'type' => $notif->type,
+                'is_read' => (bool) $notif->is_read,
+                'time' => $notif->created_at ? $notif->created_at->diffForHumans() : 'Just now',
+                'created_at' => $notif->created_at ? $notif->created_at->toIso8601String() : null,
+                'data' => $notif->data ?? [],
+            ];
+        });
+
+        // Group notifications by type for tabs
+        $rideAlerts = $formatted->filter(function ($item) {
+            return in_array($item['type'], ['ride_request', 'ride_confirmed', 'ride_accepted', 'ride_completed', 'ride_cancelled', 'success', 'info']);
+        })->values();
+
+        $offers = $formatted->filter(function ($item) {
+            return in_array($item['type'], ['promo', 'offer', 'cashback']);
+        })->values();
+
+        $systemUpdates = $formatted->filter(function ($item) {
+            return in_array($item['type'], ['system', 'warning', 'update']);
+        })->values();
+
         return response()->json([
             'success' => true,
+            'unread_count' => $unreadCount,
             'data' => [
-                'ride_alerts' => [
-                    ['id' => 1, 'title' => 'Ride Confirmed', 'message' => 'Your driver is on the way.', 'time' => '10 mins ago', 'type' => 'success'],
-                    ['id' => 2, 'title' => 'Trip Completed', 'message' => 'Thank you for riding with us. Fare: ৳150.', 'time' => '1 hour ago', 'type' => 'info'],
-                ],
-                'offers' => [
-                    ['id' => 3, 'title' => '20% Off on Next Ride', 'message' => 'Use code RIDE20 for your next booking.', 'time' => 'Yesterday', 'type' => 'promo'],
-                    ['id' => 4, 'title' => 'Cashback Received', 'message' => '৳50 cashback added to your wallet.', 'time' => '2 days ago', 'type' => 'success'],
-                ],
-                'system_updates' => [
-                    ['id' => 5, 'title' => 'App Update Available', 'message' => 'Update your app for better performance.', 'time' => '3 days ago', 'type' => 'warning'],
-                ]
+                'all' => $formatted,
+                'ride_alerts' => $rideAlerts,
+                'offers' => $offers,
+                'system_updates' => $systemUpdates,
             ],
             'settings' => [
-                'push_notifications' => (bool) $request->user()->push_notifications,
-                'sms_notifications' => (bool) $request->user()->sms_notifications,
+                'push_notifications' => (bool) $user->push_notifications,
+                'sms_notifications' => (bool) $user->sms_notifications,
             ]
+        ]);
+    }
+
+    public function markNotificationsRead(Request $request)
+    {
+        \App\Models\Notification::where('user_id', $request->user()->id)
+            ->where('is_read', false)
+            ->update(['is_read' => true]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'All notifications marked as read',
+            'unread_count' => 0,
+        ]);
+    }
+
+    public function markSingleNotificationRead(Request $request, $id)
+    {
+        \App\Models\Notification::where('user_id', $request->user()->id)
+            ->where('id', $id)
+            ->update(['is_read' => true]);
+
+        $unreadCount = \App\Models\Notification::where('user_id', $request->user()->id)
+            ->where('is_read', false)
+            ->count();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Notification marked as read',
+            'unread_count' => $unreadCount,
         ]);
     }
 
