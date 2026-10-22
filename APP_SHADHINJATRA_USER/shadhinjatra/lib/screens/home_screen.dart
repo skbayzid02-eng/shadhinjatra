@@ -9,10 +9,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shadhinjatra/services/auth_service.dart';
 import 'package:shadhinjatra/screens/account/notifications/notifications_screen.dart';
 import 'package:shadhinjatra/screens/account/account_dashboard.dart';
+import 'package:shadhinjatra/screens/chat_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:ui';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final String? initialVehicleType;
+  const HomeScreen({super.key, this.initialVehicleType});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -28,7 +31,6 @@ class _HomeScreenState extends State<HomeScreen> {
   LatLng? _dropoffLatLng;
   List<LatLng> _routePolyline = [];
 
-  bool _isLoadingLocation = true;
   bool _isRouting = false;
   bool _isBooking = false;
 
@@ -50,14 +52,37 @@ class _HomeScreenState extends State<HomeScreen> {
   int? _currentRideId;
   int _unreadNotificationsCount = 0;
   Timer? _notificationPollTimer;
+  Timer? _statusTimer;
+  Timer? _liveTrackingTimer;
+  Timer? _nearbyDriversTimer;
+  Map<String, dynamic>? _activeRideTracking;
+  LatLng? _driverLatLng;
+  List<LatLng> _driverToPickupPolyline = [];
+  bool _hasFittedDriverCamera = false;
+  List<Map<String, dynamic>> _nearbyDrivers = [];
+
+  String _normalizeVehicle(String? name) {
+    if (name == null || name.isEmpty) return 'Car';
+    final lower = name.toLowerCase();
+    if (lower.contains('car') || lower.contains('private')) return 'Car';
+    if (lower.contains('bike') || lower.contains('motor') || lower.contains('scooter')) return 'Bike';
+    if (lower.contains('cng')) return 'CNG';
+    if (lower.contains('rickshaw') || lower.contains('bicycle') || lower.contains('cycle')) return 'Rickshaw';
+    if (lower.contains('micro') || lower.contains('van')) return 'Microbus';
+    return 'Car';
+  }
 
   @override
   void initState() {
     super.initState();
+    if (widget.initialVehicleType != null) {
+      _selectedVehicle = _normalizeVehicle(widget.initialVehicleType);
+    }
     _getUserLocation();
     _fetchUserName();
     _fetchNotificationsCount();
     _startNotificationPolling();
+    _startNearbyDriversPolling();
   }
 
   Future<void> _fetchUserName() async {
@@ -112,12 +137,13 @@ class _HomeScreenState extends State<HomeScreen> {
       if (permission == LocationPermission.denied) return;
     }
 
-    Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+    Position position = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
     setState(() {
       _currentLocation = LatLng(position.latitude, position.longitude);
       _pickupLatLng = _currentLocation;
       _pickupController.text = "Current Location";
-      _isLoadingLocation = false;
     });
 
     _mapController.move(_currentLocation, 15.0);
@@ -228,9 +254,11 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() {
             _isRideRequested = true;
             _currentRideId = data['data']?['id'];
+            _hasFittedDriverCamera = false;
+            _driverToPickupPolyline = [];
           });
           _fetchNotificationsCount();
-          _startPollingRideStatus();
+          _startLiveTrackingPolling();
         }
       } else {
         if (mounted) {
@@ -250,84 +278,184 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Timer? _statusTimer;
 
-  void _startPollingRideStatus() {
-    _statusTimer?.cancel();
-    _statusTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+  void _startNearbyDriversPolling() {
+    _nearbyDriversTimer?.cancel();
+    _fetchNearbyDrivers();
+    _nearbyDriversTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted && !_isRideRequested) {
+        _fetchNearbyDrivers();
+      }
+    });
+  }
+
+  Future<void> _fetchNearbyDrivers() async {
+    if (_isRideRequested) return;
+    try {
+      final res = await AuthService.fetchNearbyDrivers(_currentLocation.latitude, _currentLocation.longitude, _selectedVehicle);
+      if (res['success'] == true && mounted) {
+        setState(() {
+          _nearbyDrivers = List<Map<String, dynamic>>.from(res['data'] ?? []);
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _startLiveTrackingPolling() {
+    _liveTrackingTimer?.cancel();
+    _liveTrackingTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      if (!mounted || !_isRideRequested) {
+        timer.cancel();
+        return;
+      }
       try {
-        final prefs = await SharedPreferences.getInstance();
-        final token = prefs.getString('auth_token');
-        final response = await http.get(
-          Uri.parse('${AuthService.baseUrl}/rides/current'),
-          headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'},
-        );
-        final data = jsonDecode(response.body);
-        if (response.statusCode == 200 && data['success'] == true) {
-          final ride = data['data'];
-          final status = ride['status'];
-          if (status == 'ongoing' || status == 'accepted') {
+        final res = await AuthService.fetchRideTracking(_currentRideId);
+        if (res['success'] == true && res['data'] != null && mounted) {
+          final data = res['data'];
+          final status = data['status'];
+
+          if (status == 'completed') {
             timer.cancel();
-            if (mounted) {
-              setState(() => _isRideRequested = false);
-              _fetchNotificationsCount();
-              
-              showDialog(
-                context: context,
-                barrierDismissible: true,
-                builder: (BuildContext context) {
-                  final driverName = ride['driver_name'] ?? 'Driver';
-                  final driverPhone = ride['driver_phone'] ?? '';
-                  return AlertDialog(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), shape: BoxShape.circle),
-                          child: const Icon(Icons.check_circle, color: Colors.green, size: 60),
-                        ),
-                        const SizedBox(height: 20),
-                        const Text('Ride Confirmed!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Driver: $driverName has accepted your ride and is on the way.${driverPhone.isNotEmpty ? '\nContact: $driverPhone' : ''}',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 16, color: Colors.black54),
-                        ),
-                        const SizedBox(height: 24),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.black,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('OK'),
-                          ),
-                        )
-                      ],
-                    ),
-                  );
-                },
+            setState(() {
+              _isRideRequested = false;
+              _currentRideId = null;
+              _activeRideTracking = null;
+              _driverLatLng = null;
+              _driverToPickupPolyline = [];
+              _hasFittedDriverCamera = false;
+            });
+            _showRideCompletedDialog(data);
+            return;
+          }
+
+          if (status == 'cancelled') {
+            timer.cancel();
+            setState(() {
+              _isRideRequested = false;
+              _currentRideId = null;
+              _activeRideTracking = null;
+              _driverLatLng = null;
+              _driverToPickupPolyline = [];
+              _hasFittedDriverCamera = false;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('রাইডটি বাতিল করা হয়েছে')),
+            );
+            return;
+          }
+
+          final driverData = data['driver'] as Map<String, dynamic>?;
+          LatLng? newDriverPos;
+          if (driverData != null && driverData['latitude'] != null && driverData['longitude'] != null) {
+            newDriverPos = LatLng(
+              (driverData['latitude'] as num).toDouble(),
+              (driverData['longitude'] as num).toDouble(),
+            );
+          }
+
+          setState(() {
+            _activeRideTracking = data;
+            _driverLatLng = newDriverPos;
+
+            // Sync locations if missing
+            if (_pickupLatLng == null && data['pickup']?['latitude'] != null) {
+              _pickupLatLng = LatLng(
+                (data['pickup']['latitude'] as num).toDouble(),
+                (data['pickup']['longitude'] as num).toDouble(),
               );
             }
+            if (_dropoffLatLng == null && data['dropoff']?['latitude'] != null) {
+              _dropoffLatLng = LatLng(
+                (data['dropoff']['latitude'] as num).toDouble(),
+                (data['dropoff']['longitude'] as num).toDouble(),
+              );
+            }
+          });
+
+          // First time driver is assigned: automatically fit camera bounds to show driver and user
+          if (!_hasFittedDriverCamera && _driverLatLng != null && _pickupLatLng != null) {
+            _hasFittedDriverCamera = true;
+            final points = [_driverLatLng!, _pickupLatLng!];
+            if (_dropoffLatLng != null) points.add(_dropoffLatLng!);
+            final bounds = LatLngBounds.fromPoints(points);
+            _mapController.fitCamera(
+              CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(75)),
+            );
+          }
+
+          // Fetch driver-to-pickup route if driver is on the way
+          if (_driverLatLng != null && _pickupLatLng != null && (status == 'accepted' || status == 'ongoing')) {
+            _fetchDriverToPickupRoute(_driverLatLng!, _pickupLatLng!);
           }
         }
       } catch (e) {
-        debugPrint("Error polling status: $e");
+        debugPrint("Live tracking poll error: $e");
       }
     });
+  }
+
+  Future<void> _fetchDriverToPickupRoute(LatLng driverPos, LatLng pickupPos) async {
+    try {
+      final startCoords = '${driverPos.longitude},${driverPos.latitude}';
+      final endCoords = '${pickupPos.longitude},${pickupPos.latitude}';
+      final routeRes = await AuthService.route(startCoords, endCoords);
+      if (routeRes['success'] == true && routeRes['geometry'] != null) {
+        final geom = routeRes['geometry'] as List<dynamic>;
+        if (mounted) {
+          setState(() {
+            _driverToPickupPolyline = geom.map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())).toList();
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _showRideCompletedDialog(Map<String, dynamic> data) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), shape: BoxShape.circle),
+              child: const Icon(Icons.check_circle, color: Colors.green, size: 60),
+            ),
+            const SizedBox(height: 16),
+            const Text('রাইড সম্পন্ন হয়েছে!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text('ভাড়া: ৳${data['fare_amount'] ?? ''}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.deepPurple)),
+            const SizedBox(height: 8),
+            const Text('স্বাধীনযাত্রার সাথে ভ্রমণের জন্য ধন্যবাদ।', textAlign: TextAlign.center, style: TextStyle(color: Colors.black54)),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('ঠিক আছে'),
+              ),
+            )
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
     _statusTimer?.cancel();
     _notificationPollTimer?.cancel();
+    _liveTrackingTimer?.cancel();
+    _nearbyDriversTimer?.cancel();
     super.dispose();
   }
 
@@ -365,37 +493,217 @@ class _HomeScreenState extends State<HomeScreen> {
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.shadhinjatra',
               ),
-              if (_routePolyline.isNotEmpty)
-                PolylineLayer(
-                  polylines: [
+              PolylineLayer(
+                polylines: [
+                  // 1. Trip Polyline from Pickup to Dropoff (solid black)
+                  if (_routePolyline.isNotEmpty)
                     Polyline(
                       points: _routePolyline,
-                      color: Colors.black,
-                      strokeWidth: 4.0,
-                    )
-                  ],
-                ),
+                      color: Colors.black87,
+                      strokeWidth: 4.5,
+                    ),
+                  // 2. Incoming Driver Route to Pickup (vibrant purple/indigo)
+                  if (_driverToPickupPolyline.isNotEmpty && _activeRideTracking?['status'] != 'started')
+                    Polyline(
+                      points: _driverToPickupPolyline,
+                      color: const Color(0xFF6A11CB),
+                      strokeWidth: 5.0,
+                    ),
+                ],
+              ),
               MarkerLayer(
                 markers: [
-                  if (_pickupLatLng != null)
+                  // 1. Rider Live Location Marker
+                  Marker(
+                    point: _currentLocation,
+                    width: 44,
+                    height: 44,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: Colors.blueAccent.withValues(alpha: 0.25),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        Container(
+                          width: 18,
+                          height: 18,
+                          decoration: BoxDecoration(
+                            color: Colors.blueAccent,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 3),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.blueAccent.withValues(alpha: 0.5),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // 2. Pickup location marker
+                  if (_pickupLatLng != null && _pickupLatLng != _currentLocation)
                     Marker(
                       point: _pickupLatLng!,
-                      width: 50,
-                      height: 50,
+                      width: 70,
+                      height: 56,
                       child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                           const Icon(Icons.location_on, color: Colors.black, size: 40),
-                           Container(decoration: const BoxDecoration(color: Colors.black, shape: BoxShape.circle), width: 8, height: 8)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981),
+                              borderRadius: BorderRadius.circular(6),
+                              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                            ),
+                            child: const Text(
+                              'পিকআপ',
+                              style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Icon(Icons.location_on, color: Color(0xFF10B981), size: 28),
                         ],
                       ),
                     ),
+
+                  // 3. Dropoff destination marker
                   if (_dropoffLatLng != null)
                     Marker(
                       point: _dropoffLatLng!,
-                      width: 50,
-                      height: 50,
-                      child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                      width: 70,
+                      height: 56,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent,
+                              borderRadius: BorderRadius.circular(6),
+                              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                            ),
+                            child: const Text(
+                              'গন্তব্য',
+                              style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Icon(Icons.location_on, color: Colors.red, size: 28),
+                        ],
+                      ),
                     ),
+
+                  // 4. Live Assigned Driver Marker (Vehicle icon with floating driver name & ETA tag)
+                  if (_driverLatLng != null)
+                    Marker(
+                      point: _driverLatLng!,
+                      width: 100,
+                      height: 76,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.black87,
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 2))],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _activeRideTracking?['driver']?['name']?.toString().split(' ').first ?? 'ড্রাইভার',
+                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (_activeRideTracking?['driver']?['eta_minutes'] != null) ...[
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF6A11CB),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      '${_activeRideTracking?['driver']?['eta_minutes']} মি.',
+                                      style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF6A11CB).withValues(alpha: 0.25),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.all(7),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                                  ),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 2.5),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF6A11CB).withValues(alpha: 0.45),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 3),
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(Icons.directions_car_rounded, color: Colors.white, size: 20),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // 5. Nearby Drivers markers
+                  if (!_isRideRequested)
+                    ..._nearbyDrivers.map((driver) {
+                      final lat = (driver['latitude'] as num?)?.toDouble() ?? 0.0;
+                      final lng = (driver['longitude'] as num?)?.toDouble() ?? 0.0;
+                      if (lat == 0.0 || lng == 0.0) return null;
+                      return Marker(
+                        point: LatLng(lat, lng),
+                        width: 36,
+                        height: 36,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 6, offset: const Offset(0, 2)),
+                            ],
+                          ),
+                          child: const Icon(Icons.navigation_rounded, color: Colors.black87, size: 18),
+                        ),
+                      );
+                    }).whereType<Marker>(),
                 ],
               ),
             ],
@@ -511,14 +819,28 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-          // 4. Map Controls (Zoom, My Location)
+          // 4. Map Controls (Zoom, My Location, Driver Focus)
           Positioned(
             right: 20,
-            bottom: _distanceKm > 0 ? 380 : 30,
+            bottom: _isRideRequested
+                ? ((_activeRideTracking != null && _activeRideTracking!['driver'] != null) ? 420 : 260)
+                : (_distanceKm > 0 ? 380 : 30),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildMapControl(Icons.my_location, () => _mapController.move(_currentLocation, 15.0), isPrimary: true),
+                if (_driverLatLng != null) ...[
+                  _buildMapControl(
+                    Icons.navigation_rounded,
+                    () => _mapController.move(_driverLatLng!, 16.0),
+                    isPrimary: true,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                _buildMapControl(
+                  Icons.my_location,
+                  () => _mapController.move(_currentLocation, 15.0),
+                  isPrimary: _driverLatLng == null,
+                ),
                 const SizedBox(height: 12),
                 _buildMapControl(Icons.add, () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom + 1)),
                 const SizedBox(height: 8),
@@ -536,13 +858,15 @@ class _HomeScreenState extends State<HomeScreen> {
               child: _buildModernVehiclePanel(),
             ),
 
-          // 6. Finding Drivers State
+          // 6. Live Ride Tracking / Finding Drivers Panel
           if (_isRideRequested)
             Positioned(
               bottom: 0,
               left: 0,
               right: 0,
-              child: _buildFindingDriversPanel(),
+              child: (_activeRideTracking != null && _activeRideTracking!['driver'] != null)
+                  ? _buildLiveRideTrackingCard()
+                  : _buildFindingDriversPanel(),
             ),
         ],
       ),
@@ -943,7 +1267,7 @@ class _HomeScreenState extends State<HomeScreen> {
               fontSize: 15,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           const Text(
             'Waiting for driver to accept...',
             style: TextStyle(
@@ -952,42 +1276,558 @@ class _HomeScreenState extends State<HomeScreen> {
               fontSize: 13,
             ),
           ),
-          const SizedBox(height: 28),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.black,
-                side: const BorderSide(color: Colors.black26, width: 2),
-                padding: const EdgeInsets.symmetric(vertical: 18),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ),
-              onPressed: () async {
-                _statusTimer?.cancel();
-                if (_currentRideId != null) {
-                  final prefs = await SharedPreferences.getInstance();
-                  final token = prefs.getString('auth_token');
-                  try {
-                    await http.post(
-                      Uri.parse('${AuthService.baseUrl}/rides/$_currentRideId/cancel'),
-                      headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'},
-                    );
-                  } catch (e) {
-                    // silently catch
-                  }
-                }
-                if (mounted) {
-                  setState(() {
-                    _isRideRequested = false;
-                    _currentRideId = null;
-                  });
-                }
-              },
-              child: const Text('Cancel Request', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-            ),
-          )
         ],
       ),
     );
+  }
+
+  Widget _buildLiveRideTrackingCard() {
+    final driver = _activeRideTracking?['driver'] as Map<String, dynamic>?;
+    final trip = _activeRideTracking?['trip'] as Map<String, dynamic>?;
+    final status = _activeRideTracking?['status'] as String? ?? 'accepted';
+    final statusLabel = _activeRideTracking?['status_label'] as String? ?? 'ড্রাইভার পিকআপের পথে আসছেন';
+    final otp = _activeRideTracking?['otp']?.toString() ?? '----';
+    final eta = driver?['eta_text']?.toString() ?? (driver?['eta_minutes'] != null ? '${driver!['eta_minutes']} মিনিট' : 'শীঘ্রই');
+    final distanceRem = driver?['distance_remaining']?.toString() ?? '';
+    final driverName = driver?['name']?.toString() ?? 'ড্রাইভার';
+    final driverPhone = driver?['phone']?.toString() ?? '';
+    final vehicleType = _activeRideTracking?['vehicle_type']?.toString() ?? _selectedVehicle;
+    final vehicleModel = driver?['vehicle_model']?.toString() ?? '$vehicleType • Car';
+    final licensePlate = driver?['license_plate']?.toString() ?? 'ঢাকা-মেট্রো গ-১২৩৪';
+    final fare = _activeRideTracking?['fare_amount'] != null ? '৳${_activeRideTracking!['fare_amount']}' : '৳$_fareAmount';
+    final paymentMethod = _activeRideTracking?['payment_method']?.toString() ?? (_paymentMethod == 'online' ? 'Digital' : 'Cash');
+    
+    final pickupText = trip?['pickup_location']?.toString() ?? _activeRideTracking?['pickup']?['location']?.toString() ?? _pickupController.text;
+    final dropoffText = trip?['dropoff_location']?.toString() ?? _activeRideTracking?['dropoff']?['location']?.toString() ?? _dropoffController.text;
+    final tripDuration = trip?['duration_text']?.toString() ?? '$_durationMins মিনিট';
+    final tripDist = trip?['distance_text']?.toString() ?? '$_distanceKm কিমি';
+
+    Color statusColor = const Color(0xFF2575FC);
+    IconData statusIcon = Icons.directions_car_rounded;
+    if (status == 'arrived') {
+      statusColor = const Color(0xFF8E2DE2);
+      statusIcon = Icons.where_to_vote_rounded;
+    } else if (status == 'started') {
+      statusColor = const Color(0xFF10B981);
+      statusIcon = Icons.navigation_rounded;
+    } else if (status == 'ongoing' || status == 'accepted') {
+      statusColor = const Color(0xFF6A11CB);
+      statusIcon = Icons.near_me_rounded;
+    }
+
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.97),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.14),
+                blurRadius: 28,
+                offset: const Offset(0, -6),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // 1. Status Banner with Live Pulsing Icon, ETA & Security OTP
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [statusColor.withValues(alpha: 0.12), statusColor.withValues(alpha: 0.04)],
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: statusColor.withValues(alpha: 0.28)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: statusColor,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(statusIcon, color: Colors.white, size: 18),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              statusLabel,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: statusColor,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (distanceRem.isNotEmpty || eta.isNotEmpty)
+                              Text(
+                                '$distanceRem ${distanceRem.isNotEmpty ? '•' : ''} আসতে $eta',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade800,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      // OTP Box
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Column(
+                          children: [
+                            const Text('নিরাপত্তা OTP', style: TextStyle(color: Colors.white70, fontSize: 8, fontWeight: FontWeight.bold)),
+                            Text(
+                              otp,
+                              style: const TextStyle(
+                                color: Color(0xFFFFD700),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // 2. Driver Profile & Vehicle Details Card
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Stack(
+                            children: [
+                              CircleAvatar(
+                                radius: 24,
+                                backgroundColor: Colors.deepPurple.shade50,
+                                backgroundImage: driver?['avatar'] != null ? NetworkImage(driver!['avatar']) : null,
+                                child: driver?['avatar'] == null
+                                    ? const Icon(Icons.person, color: Colors.deepPurple, size: 28)
+                                    : null,
+                              ),
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                                  child: const Icon(Icons.verified, color: Colors.blue, size: 14),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  driverName,
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.star_rounded, color: Colors.amber, size: 15),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      '${driver?['rating'] ?? 5.0}',
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: Colors.grey.shade300),
+                                      ),
+                                      child: Text(
+                                        vehicleType,
+                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.black87),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                fare,
+                                style: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF2E7D32),
+                                ),
+                              ),
+                              Text(
+                                paymentMethod,
+                                style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      // Vehicle Model & Bengali Number Plate
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.directions_car_rounded, color: Color(0xFF6A11CB), size: 17),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                vehicleModel,
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: Colors.black87),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFFBEB),
+                                borderRadius: BorderRadius.circular(5),
+                                border: Border.all(color: const Color(0xFFFDE68A)),
+                              ),
+                              child: Text(
+                                licensePlate,
+                                style: const TextStyle(
+                                  color: Color(0xFF92400E),
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 11,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                // 3. Trip Route & Time Summary (পিকআপ ও গন্তব্য স্থান এবং পৌঁছাতে কত সময় লাগবে)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Column(
+                    children: [
+                      // Pickup Row
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 3.0),
+                            child: Icon(Icons.circle, color: Color(0xFF10B981), size: 9),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('পিকআপ স্থান', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                                Text(
+                                  pickupText.isNotEmpty ? pickupText : 'আপনার বর্তমান অবস্থান',
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 4.0),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(width: 1.5, height: 10, color: Colors.grey.shade300),
+                        ),
+                      ),
+                      // Dropoff Row
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 3.0),
+                            child: Icon(Icons.square, color: Colors.redAccent, size: 9),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('গন্তব্য স্থান', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                                Text(
+                                  dropoffText.isNotEmpty ? dropoffText : 'নির্বাচিত গন্তব্য',
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Divider(height: 14),
+                      // Duration & Distance metrics
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.schedule, size: 14, color: Colors.black54),
+                              const SizedBox(width: 4),
+                              Text(
+                                'যাত্রার সময়: $tripDuration',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.black87),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              const Icon(Icons.alt_route_rounded, size: 14, color: Colors.black54),
+                              const SizedBox(width: 4),
+                              Text(
+                                'মোট দূরত্ব: $tripDist',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.black87),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // 4. Action Buttons: SOS 999, Call, Chat, Cancel
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.red.shade700,
+                          side: BorderSide(color: Colors.red.shade200, width: 1.5),
+                          backgroundColor: Colors.red.shade50.withValues(alpha: 0.5),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () => _callEmergency(),
+                        icon: const Icon(Icons.shield_rounded, size: 17, color: Colors.red),
+                        label: const Text('SOS 999', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2E7D32),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          elevation: 0,
+                        ),
+                        onPressed: driverPhone.isNotEmpty ? () => _callDriver(driverPhone) : null,
+                        icon: const Icon(Icons.call, size: 17),
+                        label: const Text('কল করুন', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.black87,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          elevation: 0,
+                        ),
+                        onPressed: () {
+                          if (_currentRideId != null) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ChatScreen(
+                                  rideId: _currentRideId!,
+                                  otherPersonName: driverName,
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.chat_bubble_outline_rounded, size: 17),
+                        label: const Text('চ্যাট', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () => _cancelActiveRide(),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: const Icon(Icons.close_rounded, color: Colors.black87, size: 20),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _callDriver(String phone) async {
+    final uri = Uri.parse('tel:$phone');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    }
+  }
+
+  Future<void> _callEmergency() async {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            SizedBox(width: 8),
+            Text('জরুরি সহায়তা ৯৯৯', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text('আপনি কি সরাসরি জাতীয় জরুরি সেবা ৯৯৯ এ কল করতে চান?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('না', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final uri = Uri.parse('tel:999');
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri);
+              }
+            },
+            child: const Text('হ্যাঁ, কল করুন'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _cancelActiveRide() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('রাইড বাতিল করবেন?'),
+        content: const Text('আপনি কি নিশ্চিত যে বর্তমান রাইডটি বাতিল করতে চান?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('না')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('হ্যাঁ, বাতিল করুন'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && _currentRideId != null) {
+      final res = await AuthService.cancelCurrentRide(_currentRideId!);
+      if (mounted) {
+        _liveTrackingTimer?.cancel();
+        setState(() {
+          _isRideRequested = false;
+          _currentRideId = null;
+          _activeRideTracking = null;
+          _driverLatLng = null;
+          _driverToPickupPolyline = [];
+          _hasFittedDriverCamera = false;
+          _distanceKm = 0.0;
+          _durationMins = 0;
+          _routePolyline = [];
+          _dropoffLatLng = null;
+          _dropoffController.clear();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(res['message'] ?? 'রাইড সফলভাবে বাতিল করা হয়েছে')),
+        );
+      }
+    }
   }
 }

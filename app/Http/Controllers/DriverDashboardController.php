@@ -26,6 +26,7 @@ class DriverDashboardController extends Controller
         $dailyStats = [];
         $totalEarnings = 0;
         $totalRides = 0;
+        $totalDistance = 0;
         
         // Initialize all days with 0
         for ($i = 0; $i < $days; $i++) {
@@ -34,7 +35,8 @@ class DriverDashboardController extends Controller
                 'date' => $dateStr,
                 'display_date' => \Carbon\Carbon::today()->subDays($i)->format('d M'),
                 'rides_count' => 0,
-                'earnings' => 0
+                'earnings' => 0,
+                'distance' => 0,
             ];
         }
 
@@ -43,9 +45,11 @@ class DriverDashboardController extends Controller
             if (isset($dailyStats[$dateStr])) {
                 $dailyStats[$dateStr]['rides_count']++;
                 $dailyStats[$dateStr]['earnings'] += $ride->fare_amount;
+                $dailyStats[$dateStr]['distance'] += round((float) ($ride->distance_km ?? 0), 1);
                 
                 $totalEarnings += $ride->fare_amount;
                 $totalRides++;
+                $totalDistance += (float) ($ride->distance_km ?? 0);
             }
         }
         
@@ -58,6 +62,7 @@ class DriverDashboardController extends Controller
                 'period_days' => $days,
                 'total_earnings' => $totalEarnings,
                 'total_rides' => $totalRides,
+                'total_distance' => round($totalDistance, 1),
                 'daily_stats' => $dailyStatsList,
                 'balance' => $totalEarnings, // Just a placeholder for wallet balance
             ],

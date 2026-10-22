@@ -409,4 +409,56 @@ class AuthService {
       return {'success': false, 'message': 'Network error'};
     }
   }
+
+  static Future<Map<String, dynamic>> fetchRideTracking([int? rideId]) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) {
+      return {'success': false, 'message': 'Unauthenticated'};
+    }
+
+    try {
+      final url = rideId != null 
+          ? '$baseUrl/rides/$rideId/tracking' 
+          : '$baseUrl/rides/current/tracking';
+      final response = await http.get(Uri.parse(url), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchNearbyDrivers(double lat, double lng, [String? vehicleType]) async {
+    final headers = await getHeaders();
+    try {
+      var url = '$baseUrl/map/nearby-drivers?latitude=$lat&longitude=$lng';
+      if (vehicleType != null && vehicleType.isNotEmpty) {
+        url += '&vehicle_type=$vehicleType';
+      }
+      final response = await http.get(Uri.parse(url), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchPromotions() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/promotions'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> cancelCurrentRide(int rideId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(Uri.parse('$baseUrl/rides/$rideId/cancel'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
 }
+

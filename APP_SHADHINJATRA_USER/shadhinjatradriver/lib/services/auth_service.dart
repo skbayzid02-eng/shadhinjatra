@@ -122,6 +122,30 @@ class AuthService {
     }
   }
 
+  static Future<Map<String, dynamic>> fetchNearbyRideRequests() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/nearby-requests'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        return {'success': false, 'message': 'Failed to load nearby requests'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
   static Future<Map<String, dynamic>> updateDriverStatus(bool isOnline) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
@@ -140,7 +164,28 @@ class AuthService {
 
       return jsonDecode(response.body);
     } catch (e) {
-      return {'success': false, 'message': 'Network error'};
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> sendHeartbeat() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/heartbeat'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      );
+
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
     }
   }
 
@@ -163,6 +208,32 @@ class AuthService {
       return jsonDecode(response.body);
     } catch (e) {
       return null;
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateRideStatus(int rideId, String status, {double? lat, double? lng}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rides/$rideId/status'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'status': status,
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+        }),
+      );
+
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
     }
   }
 
@@ -195,6 +266,27 @@ class AuthService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/ride/$rideId/reject'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      );
+
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> timeoutRide(int rideId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/ride/$rideId/timeout'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -311,6 +403,66 @@ class AuthService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/driver/notifications'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> toggleDriverNotifications(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/notifications/toggle'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'enabled': enabled}),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> confirmRideFromNotification(int id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/notifications/$id/confirm'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> deleteNotification(int id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/driver/notifications/$id'),
         headers: {
           'Authorization': 'Bearer $token',
           'Accept': 'application/json',

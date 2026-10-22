@@ -91,44 +91,74 @@ class _EarningsScreenState extends State<EarningsScreen> {
           else if (_earningsData != null) ...[
             // Summary Cards
             Padding(
-              padding: const EdgeInsets.all(16.0),
+              padding: const EdgeInsets.all(12.0),
               child: Row(
                 children: [
                   Expanded(
                     child: Card(
                       color: Colors.green.shade50,
                       elevation: 2,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       child: Padding(
-                        padding: const EdgeInsets.all(20.0),
+                        padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
                         child: Column(
                           children: [
-                            const Text('Total Earnings', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 8),
-                            Text(
-                              '৳${_earningsData!['total_earnings']}',
-                              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Colors.green),
+                            const Text('Earnings', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12)),
+                            const SizedBox(height: 6),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '৳${_earningsData!['total_earnings']}',
+                                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.green),
+                              ),
                             ),
                           ],
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Card(
                       color: Colors.blue.shade50,
                       elevation: 2,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       child: Padding(
-                        padding: const EdgeInsets.all(20.0),
+                        padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
                         child: Column(
                           children: [
-                            const Text('Total Rides', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 8),
-                            Text(
-                              '${_earningsData!['total_rides']}',
-                              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Colors.blue),
+                            const Text('Rides', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12)),
+                            const SizedBox(height: 6),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '${_earningsData!['total_rides']}',
+                                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.blue),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Card(
+                      color: Colors.deepOrange.shade50,
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
+                        child: Column(
+                          children: [
+                            const Text('Distance', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12)),
+                            const SizedBox(height: 6),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '${_earningsData!['total_distance'] ?? 0} km',
+                                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.deepOrange.shade700),
+                              ),
                             ),
                           ],
                         ),
@@ -173,7 +203,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                               child: Icon(Icons.calendar_today, color: hasRides ? Colors.orange : Colors.grey, size: 20),
                             ),
                             title: Text(stat['display_date'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text('${stat['rides_count']} Rides completed'),
+                            subtitle: Text('${stat['rides_count']} Rides • ${stat['distance'] ?? 0} km'),
                             trailing: Text(
                               '৳${stat['earnings']}',
                               style: TextStyle(

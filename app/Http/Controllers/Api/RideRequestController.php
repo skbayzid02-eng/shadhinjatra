@@ -60,34 +60,10 @@ class RideRequestController extends Controller
             'is_read' => false,
         ]);
 
-        // Create in-app notifications for drivers
-        $drivers = \App\Models\User::whereNotNull('vehicle_type')
-            ->where('id', '!=', $request->user()->id)
-            ->get();
-
-        if ($drivers->isEmpty()) {
-            $drivers = \App\Models\User::where('id', '!=', $request->user()->id)->get();
-        }
-
-        foreach ($drivers as $driver) {
-            \App\Models\Notification::create([
-                'user_id' => $driver->id,
-                'ride_id' => $ride->id,
-                'title' => 'নতুন রাইড রিকোয়েস্ট (New Ride Request)',
-                'message' => ($request->user()->name ?? 'যাত্রী') . " একটি {$ride->vehicle_type} বুকিং রিকোয়েস্ট করেছেন। ভাড়া: ৳{$ride->fare_amount}",
-                'type' => 'ride_request',
-                'data' => [
-                    'ride_id' => $ride->id,
-                    'passenger_name' => $request->user()->name ?? 'Guest Passenger',
-                    'passenger_phone' => $request->user()->phone ?? '',
-                    'pickup' => $ride->pickup_location,
-                    'dropoff' => $ride->dropoff_location,
-                    'vehicle_type' => $ride->vehicle_type,
-                    'fare' => $ride->fare_amount,
-                ],
-                'is_read' => false,
-            ]);
-        }
+        // Intelligently rank nearby drivers based on distance, rating, and experience,
+        // and dispatch to the #1 most suitable driver first with timeout window
+        $dispatchService = app(\App\Services\RideDispatchService::class);
+        $assignedDriver = $dispatchService->dispatchToNextDriver($ride);
 
         // Broadcast to drivers
         \App\Events\RideRequested::dispatch($ride);
@@ -95,7 +71,10 @@ class RideRequestController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Ride requested successfully',
-            'data' => $ride
+            'data' => array_merge($ride->toArray(), [
+                'dispatched_driver_id' => $assignedDriver ? $assignedDriver->id : null,
+                'dispatch_expires_at' => $ride->dispatch_expires_at,
+            ])
         ], 201);
     }
 }

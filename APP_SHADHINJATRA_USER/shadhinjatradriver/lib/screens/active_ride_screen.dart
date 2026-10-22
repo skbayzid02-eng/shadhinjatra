@@ -17,8 +17,10 @@ class ActiveRideScreen extends StatefulWidget {
 
 class _ActiveRideScreenState extends State<ActiveRideScreen> {
   bool _hasArrived = false;
+  bool _isTripStarted = false;
   int _waitingSeconds = 0;
   Timer? _waitingTimer;
+  Timer? _locationSyncTimer;
   
   final MapController _mapController = MapController();
   List<LatLng> _routePoints = [];
@@ -37,7 +39,9 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
       // Get current driver location (or fallback to Dhaka)
       Position? position;
       try {
-        position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        );
       } catch (e) {
         // Ignore if permission denied, fallback
       }
@@ -49,12 +53,16 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
       
       // Target destination (pickup location if not arrived, dropoff if arrived)
       double tLat = double.tryParse(req['pickup_lat']?.toString() ?? '23.8203') ?? 23.8203;
-      double tLng = double.tryParse(req['pickup_lng']?.toString() ?? '90.4225') ?? 90.4225;
+      double tLng = double.tryParse(req['pickup_lng']?.toString() ?? req['pickup_lon']?.toString() ?? '90.4225') ?? 90.4225;
       
       setState(() {
         _driverLocation = LatLng(dLat, dLng);
         _destinationLocation = LatLng(tLat, tLng);
       });
+
+      _syncDriverLocation();
+      _locationSyncTimer?.cancel();
+      _locationSyncTimer = Timer.periodic(const Duration(seconds: 4), (_) => _syncDriverLocation());
       
       // Fetch route
       final res = await AuthService.fetchRoute(dLat, dLng, tLat, tLng);
@@ -80,6 +88,25 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
       if (mounted) setState(() => _isLoadingMap = false);
     }
   }
+
+  Future<void> _syncDriverLocation() async {
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      if (mounted) {
+        setState(() {
+          _driverLocation = LatLng(position.latitude, position.longitude);
+        });
+      }
+      await AuthService.updateDriverLocation(position.latitude, position.longitude);
+      final rideId = widget.rideData['id'];
+      if (rideId != null) {
+        final currentStatus = _isTripStarted ? 'started' : (_hasArrived ? 'arrived' : 'accepted');
+        await AuthService.updateRideStatus(rideId, currentStatus, lat: position.latitude, lng: position.longitude);
+      }
+    } catch (_) {}
+  }
   
   void _fitMapBounds() {
     if (_routePoints.isEmpty) return;
@@ -90,7 +117,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     ));
   }
 
-  void _markAsArrived() {
+  void _markAsArrived() async {
     setState(() {
       _hasArrived = true;
     });
@@ -100,12 +127,79 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         _waitingSeconds++;
       });
     });
-    
-    // Optionally: re-fetch route for Dropoff location here if needed
+
+    final rideId = widget.rideData['id'];
+    if (rideId != null) {
+      await AuthService.updateRideStatus(rideId, 'arrived', lat: _driverLocation?.latitude, lng: _driverLocation?.longitude);
+    }
+  }
+
+  void _startTrip() async {
+    _waitingTimer?.cancel();
+    setState(() {
+      _isTripStarted = true;
+    });
+
+    final rideId = widget.rideData['id'];
+    if (rideId != null) {
+      await AuthService.updateRideStatus(rideId, 'started', lat: _driverLocation?.latitude, lng: _driverLocation?.longitude);
+    }
+
+    // Switch route to dropoff destination
+    final req = widget.rideData;
+    double? dLat = double.tryParse(req['dropoff_lat']?.toString() ?? '');
+    double? dLng = double.tryParse(req['dropoff_lng']?.toString() ?? req['dropoff_lon']?.toString() ?? '');
+    if (dLat != null && dLng != null) {
+      setState(() {
+        _destinationLocation = LatLng(dLat, dLng);
+      });
+      if (_driverLocation != null) {
+        final res = await AuthService.fetchRoute(_driverLocation!.latitude, _driverLocation!.longitude, dLat, dLng);
+        if (res['success'] == true && res['geometry'] != null) {
+          final List<dynamic> coords = res['geometry'];
+          final List<LatLng> points = coords.map((c) => LatLng(c[1], c[0])).toList();
+          setState(() {
+            _routePoints = points;
+          });
+          _fitMapBounds();
+        }
+      }
+    }
+  }
+
+  void _completeTrip() async {
+    final rideId = widget.rideData['id'];
+    if (rideId != null) {
+      await AuthService.updateRideStatus(rideId, 'completed', lat: _driverLocation?.latitude, lng: _driverLocation?.longitude);
+    }
+    _waitingTimer?.cancel();
+    _locationSyncTimer?.cancel();
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('রাইড সম্পন্ন হয়েছে!'),
+          content: Text('ভাড়া: ৳${widget.rideData['fare'] ?? widget.rideData['fare_amount'] ?? ''}\nসফলভাবে সম্পন্ন করার জন্য ধন্যবাদ।'),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.pop(context);
+              },
+              child: const Text('ঠিক আছে'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   void _cancelRide() {
     _waitingTimer?.cancel();
+    _locationSyncTimer?.cancel();
     Navigator.pop(context); // Return to home screen
   }
 
@@ -118,6 +212,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   @override
   void dispose() {
     _waitingTimer?.cancel();
+    _locationSyncTimer?.cancel();
     _mapController.dispose();
     super.dispose();
   }
@@ -304,20 +399,32 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                 const SizedBox(height: 24),
 
                 if (_hasArrived) ...[
-                  // Waiting Timer State
-                  Text('Waiting Timer: ${_formatDuration(_waitingSeconds)}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.red)),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Starting trip...')));
-                      },
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                      child: const Text('START TRIP', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
+                  if (_isTripStarted) ...[
+                    const Text('যাত্রা চলছে (Trip in Progress)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed: _completeTrip,
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, elevation: 0),
+                        child: const Text('COMPLETE TRIP (রাইড সমাপ্ত)', style: TextStyle(fontSize: 17, color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
                     ),
-                  )
+                  ] else ...[
+                    // Waiting Timer State
+                    Text('Waiting Timer: ${_formatDuration(_waitingSeconds)}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.red)),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed: _startTrip,
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.green, elevation: 0),
+                        child: const Text('START TRIP (যাত্রা শুরু)', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
                 ] else ...[
                   // Arrived Button State
                   SizedBox(
@@ -325,8 +432,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                     height: 50,
                     child: ElevatedButton(
                       onPressed: _markAsArrived,
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-                      child: const Text('ARRIVED', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, elevation: 0),
+                      child: const Text('ARRIVED (পিকআপে পৌঁছেছি)', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],

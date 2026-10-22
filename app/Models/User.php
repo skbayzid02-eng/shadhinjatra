@@ -11,7 +11,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'phone', 'address', 'password', 'avatar', 'is_online', 'latitude', 'longitude', 'vehicle_type'])]
+#[Fillable(['name', 'email', 'phone', 'address', 'password', 'avatar', 'is_online', 'latitude', 'longitude', 'vehicle_type', 'is_verified', 'verification_status', 'documents_verified', 'subscription_status', 'subscription_expires_at', 'last_seen_at', 'push_notifications'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -27,6 +27,12 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'subscription_expires_at' => 'datetime',
+            'last_seen_at' => 'datetime',
+            'is_online' => 'boolean',
+            'is_verified' => 'boolean',
+            'documents_verified' => 'boolean',
+            'push_notifications' => 'boolean',
             'password' => 'hashed',
         ];
     }

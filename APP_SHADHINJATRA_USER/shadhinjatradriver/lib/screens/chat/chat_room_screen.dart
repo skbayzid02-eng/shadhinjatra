@@ -67,7 +67,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _scrollToBottom();
 
     try {
-      final response = await http.post(
+      await http.post(
         Uri.parse('${AuthService.baseUrl}/driver/chats/${widget.chatId}/send'),
         headers: await AuthService.getHeaders(),
         body: jsonEncode({'message': text}),
