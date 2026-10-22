@@ -81,8 +81,72 @@ class _HomeScreenState extends State<HomeScreen> {
     _getUserLocation();
     _fetchUserName();
     _fetchNotificationsCount();
+    _checkAndRestoreActiveRide();
     _startNotificationPolling();
     _startNearbyDriversPolling();
+  }
+
+  Future<void> _checkAndRestoreActiveRide() async {
+    try {
+      final res = await AuthService.fetchActiveRide();
+      if (res['success'] == true && res['data'] != null) {
+        final data = res['data'] as Map<String, dynamic>;
+        final status = data['status']?.toString();
+        if (status != null && ['pending', 'accepted', 'ongoing', 'arrived', 'started'].contains(status)) {
+          if (!mounted) return;
+          setState(() {
+            _isRideRequested = true;
+            _currentRideId = data['ride_id'] ?? data['id'];
+            _activeRideTracking = data;
+            
+            if (data['vehicle_type'] != null) {
+              _selectedVehicle = _normalizeVehicle(data['vehicle_type'].toString());
+            }
+            if (data['fare_amount'] != null) {
+              _fareAmount = (data['fare_amount'] as num).toDouble();
+            }
+            if (data['distance_km'] != null) {
+              _distanceKm = (data['distance_km'] as num).toDouble();
+            }
+            if (data['payment_method'] != null) {
+              _paymentMethod = data['payment_method'].toString().toLowerCase().contains('online') ? 'online' : 'cash';
+            }
+
+            final p = data['pickup'];
+            if (p != null && p['latitude'] != null && p['longitude'] != null) {
+              _pickupLatLng = LatLng((p['latitude'] as num).toDouble(), (p['longitude'] as num).toDouble());
+              if (p['location'] != null && p['location'].toString().isNotEmpty) {
+                _pickupController.text = p['location'].toString();
+              }
+            }
+
+            final d = data['dropoff'];
+            if (d != null && d['latitude'] != null && d['longitude'] != null) {
+              _dropoffLatLng = LatLng((d['latitude'] as num).toDouble(), (d['longitude'] as num).toDouble());
+              if (d['location'] != null && d['location'].toString().isNotEmpty) {
+                _dropoffController.text = d['location'].toString();
+              }
+            }
+
+            final driverData = data['driver'] as Map<String, dynamic>?;
+            if (driverData != null && driverData['latitude'] != null && driverData['longitude'] != null) {
+              _driverLatLng = LatLng(
+                (driverData['latitude'] as num).toDouble(),
+                (driverData['longitude'] as num).toDouble(),
+              );
+            }
+          });
+
+          _startLiveTrackingPolling();
+
+          if (_pickupLatLng != null && _dropoffLatLng != null) {
+            _fetchRoute();
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("Error restoring active ride: $e");
+    }
   }
 
   Future<void> _fetchUserName() async {
@@ -250,6 +314,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 201 || data['success'] == true) {
+        if (data['data']?['status'] == 'no_drivers_found') {
+          if (mounted) {
+            setState(() => _isRideRequested = false);
+            _showNoDriversFoundDialog(data['data']?['message'] ?? 'দুঃখিত, এই মুহূর্তে আশেপাশে কোনো উপযুক্ত ড্রাইভার পাওয়া যায়নি। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।');
+          }
+          return;
+        }
         if (mounted) {
           setState(() {
             _isRideRequested = true;
@@ -344,6 +415,20 @@ class _HomeScreenState extends State<HomeScreen> {
             return;
           }
 
+          if (status == 'no_drivers_found') {
+            timer.cancel();
+            setState(() {
+              _isRideRequested = false;
+              _currentRideId = null;
+              _activeRideTracking = null;
+              _driverLatLng = null;
+              _driverToPickupPolyline = [];
+              _hasFittedDriverCamera = false;
+            });
+            _showNoDriversFoundDialog(data['message'] ?? 'দুঃখিত, এই মুহূর্তে আপনার আশেপাশে ৫-১৫ কিমির মধ্যে কোনো উপযুক্ত ড্রাইভার পাওয়া যায়নি। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।');
+            return;
+          }
+
           final driverData = data['driver'] as Map<String, dynamic>?;
           LatLng? newDriverPos;
           if (driverData != null && driverData['latitude'] != null && driverData['longitude'] != null) {
@@ -411,37 +496,189 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showRideCompletedDialog(Map<String, dynamic> data) {
+    int rating = 5;
+    final feedbackController = TextEditingController();
+    bool isSubmitting = false;
+    final fare = data['fare_amount'] ?? data['trip']?['fare_amount'] ?? _fareAmount;
+    final paymentMethod = data['payment_method'] ?? (_paymentMethod == 'online' ? 'Digital' : 'Cash');
+    final driverName = data['driver']?['name'] ?? 'আমাদের ড্রাইভার';
+    final rideId = data['id'] ?? data['ride_id'] ?? _currentRideId;
+
     showDialog(
       context: context,
       barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.12), shape: BoxShape.circle),
+                  child: const Icon(Icons.check_circle_rounded, color: Colors.green, size: 54),
+                ),
+                const SizedBox(height: 12),
+                const Text('রাইড সম্পন্ন হয়েছে!', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Text('ড্রাইভার $driverName এর সাথে যাত্রা সমাপ্ত', style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                const SizedBox(height: 16),
+                
+                // Fare and Payment Card
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      Column(
+                        children: [
+                          const Text('মোট ভাড়া', style: TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 2),
+                          Text('৳$fare', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF2E7D32))),
+                        ],
+                      ),
+                      Container(height: 32, width: 1, color: Colors.grey.shade300),
+                      Column(
+                        children: [
+                          const Text('পেমেন্ট মাধ্যম', style: TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 2),
+                          Text(paymentMethod.toString(), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF6A11CB))),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                // Rating
+                const Text('ড্রাইভারকে রেটিং দিন:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.black87)),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (index) {
+                    final starIndex = index + 1;
+                    return IconButton(
+                      icon: Icon(
+                        starIndex <= rating ? Icons.star_rounded : Icons.star_outline_rounded,
+                        color: Colors.amber,
+                        size: 36,
+                      ),
+                      onPressed: () {
+                        setDialogState(() => rating = starIndex);
+                      },
+                    );
+                  }),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: feedbackController,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    hintText: 'ড্রাইভারের ব্যবহার বা ভ্রমণ কেমন ছিল লিখুন (ঐচ্ছিক)...',
+                    hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    filled: true,
+                    fillColor: Colors.grey.shade50,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF6A11CB),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      elevation: 0,
+                    ),
+                    onPressed: isSubmitting
+                        ? null
+                        : () async {
+                            setDialogState(() => isSubmitting = true);
+                            if (rideId != null) {
+                              final rId = rideId is int ? rideId : int.tryParse(rideId.toString()) ?? 0;
+                              try {
+                                await AuthService.confirmPayment(rId, paymentMethod: paymentMethod.toString().toLowerCase());
+                              } catch (_) {}
+                              await AuthService.rateRide(
+                                rId,
+                                rating,
+                                feedback: feedbackController.text.trim(),
+                              );
+                            }
+                            if (ctx.mounted) {
+                              Navigator.pop(ctx);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('আপনার রেটিং ও মতামত জমা হয়েছে। ধন্যবাদ!')),
+                              );
+                            }
+                          },
+                    child: isSubmitting
+                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('রেটিং জমা দিয়ে সম্পন্ন করুন', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showNoDriversFoundDialog(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), shape: BoxShape.circle),
-              child: const Icon(Icons.check_circle, color: Colors.green, size: 60),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.amber.shade300, width: 2),
+              ),
+              child: Icon(Icons.search_off_rounded, color: Colors.amber.shade800, size: 54),
             ),
-            const SizedBox(height: 16),
-            const Text('রাইড সম্পন্ন হয়েছে!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text('ভাড়া: ৳${data['fare_amount'] ?? ''}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.deepPurple)),
-            const SizedBox(height: 8),
-            const Text('স্বাধীনযাত্রার সাথে ভ্রমণের জন্য ধন্যবাদ।', textAlign: TextAlign.center, style: TextStyle(color: Colors.black54)),
-            const SizedBox(height: 20),
+            const SizedBox(height: 18),
+            const Text(
+              'কোনো ড্রাইভার পাওয়া যায়নি',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.4),
+            ),
+            const SizedBox(height: 22),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.black,
+                  backgroundColor: const Color(0xFF6A11CB),
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 0,
                 ),
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('ঠিক আছে'),
+                child: const Text('আবার চেষ্টা করুন', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
               ),
             )
           ],
@@ -1259,17 +1496,78 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Request sent to nearby $_selectedVehicle drivers',
+            'কাছের ৩ জন উপযুক্ত চালকের কাছে রিকোয়েস্ট পাঠানো হয়েছে ($_selectedVehicle)',
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.black87,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
               fontSize: 15,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
+          // Accurate Fare & Distance Card
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                Column(
+                  children: [
+                    const Text('আনুমানিক ভাড়া', style: TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 2),
+                    Text('৳$_fareAmount', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFF2E7D32))),
+                  ],
+                ),
+                Container(height: 26, width: 1, color: Colors.grey.shade300),
+                Column(
+                  children: [
+                    const Text('দূরত্ব', style: TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 2),
+                    Text('$_distanceKm কিমি', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.black87)),
+                  ],
+                ),
+                Container(height: 26, width: 1, color: Colors.grey.shade300),
+                Column(
+                  children: [
+                    const Text('পেমেন্ট', style: TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 2),
+                    Text(_paymentMethod == 'online' ? 'ডিজিটাল' : 'ক্যাশ', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF6A11CB))),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.radar_rounded, size: 16, color: Colors.blueGrey.shade700),
+                const SizedBox(width: 6),
+                Text(
+                  'সার্চ পরিধি: ৫ ➔ ৭ ➔ ১০ ➔ ১৫ কিমি • ১৫ সেকেন্ড সময়',
+                  style: TextStyle(
+                    color: Colors.blueGrey.shade800,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
           const Text(
-            'Waiting for driver to accept...',
+            'চালকের সাড়া পাওয়ার অপেক্ষা করা হচ্ছে...',
             style: TextStyle(
               color: Colors.black54,
               fontWeight: FontWeight.w500,
@@ -1397,26 +1695,76 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                       ),
-                      // OTP Box
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.black87,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Column(
-                          children: [
-                            const Text('নিরাপত্তা OTP', style: TextStyle(color: Colors.white70, fontSize: 8, fontWeight: FontWeight.bold)),
-                            Text(
-                              otp,
-                              style: const TextStyle(
-                                color: Color(0xFFFFD700),
-                                fontSize: 15,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 1.5,
+                      // OTP Box with resend dialog
+                      InkWell(
+                        onTap: () async {
+                          if (_currentRideId == null) return;
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                              title: const Row(
+                                children: [
+                                  Icon(Icons.lock_reset_rounded, color: Colors.deepPurple),
+                                  SizedBox(width: 8),
+                                  Text('নতুন OTP কোড', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                                ],
                               ),
+                              content: const Text('আপনার বর্তমান OTP মেয়াদ শেষ হয়ে থাকলে বা নতুন কোড প্রয়োজন হলে নতুন OTP তৈরি করতে পারেন।'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('বাতিল')),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6A11CB), foregroundColor: Colors.white),
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  child: const Text('নতুন OTP পাঠান'),
+                                ),
+                              ],
                             ),
-                          ],
+                          );
+                          if (confirm == true && mounted) {
+                            final res = await AuthService.resendOtp(_currentRideId!);
+                            if (res['success'] == true && res['data']?['otp'] != null) {
+                              setState(() {
+                                if (_activeRideTracking != null) {
+                                  _activeRideTracking!['otp'] = res['data']['otp'];
+                                }
+                              });
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('নতুন OTP কোড: ${res['data']['otp']} পাঠানো হয়েছে!')),
+                                );
+                              }
+                            }
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.black87,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(
+                            children: [
+                              const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('নিরাপত্তা OTP', style: TextStyle(color: Colors.white70, fontSize: 8, fontWeight: FontWeight.bold)),
+                                  SizedBox(width: 2),
+                                  Icon(Icons.refresh_rounded, color: Colors.white70, size: 9),
+                                ],
+                              ),
+                              Text(
+                                otp,
+                                style: const TextStyle(
+                                  color: Color(0xFFFFD700),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.5,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -1777,6 +2125,16 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             onPressed: () async {
               Navigator.pop(ctx);
+              if (_currentRideId != null) {
+                try {
+                  await AuthService.triggerSos(
+                    _currentRideId!,
+                    lat: _currentLocation.latitude,
+                    lng: _currentLocation.longitude,
+                    details: 'Passenger triggered SOS emergency signal via 999 button',
+                  );
+                } catch (_) {}
+              }
               final uri = Uri.parse('tel:999');
               if (await canLaunchUrl(uri)) {
                 await launchUrl(uri);
@@ -1790,18 +2148,79 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _cancelActiveRide() async {
+    if (_currentRideId == null) return;
+
+    // Fetch cancellation preview and fee
+    double fee = 0.0;
+    String explanation = 'কোনো প্রকার চার্জ ছাড়াই রাইড বাতিল করা যাবে।';
+    try {
+      final preview = await AuthService.fetchCancellationPreview(_currentRideId!);
+      if (preview['success'] == true) {
+        fee = (preview['cancellation_fee'] as num?)?.toDouble() ?? 0.0;
+        explanation = preview['explanation'] ?? explanation;
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('রাইড বাতিল করবেন?'),
-        content: const Text('আপনি কি নিশ্চিত যে বর্তমান রাইডটি বাতিল করতে চান?'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Row(
+          children: [
+            Icon(Icons.cancel_outlined, color: Colors.red),
+            SizedBox(width: 8),
+            Text('রাইড বাতিল করবেন?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(explanation, style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.4)),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: fee > 0 ? Colors.red.shade50 : Colors.green.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: fee > 0 ? Colors.red.shade200 : Colors.green.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    fee > 0 ? Icons.error_outline : Icons.check_circle_outline,
+                    color: fee > 0 ? Colors.red.shade700 : Colors.green.shade700,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    fee > 0 ? 'প্রযোজ্য বাতিল চার্জ: ৳$fee' : 'বাতিল ফি: সম্পূর্ণ ফ্রি (৳০)',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: fee > 0 ? Colors.red.shade900 : Colors.green.shade900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('না')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('না, ফিরে যান', style: TextStyle(color: Colors.grey)),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('হ্যাঁ, বাতিল করুন'),
+            child: const Text('হ্যাঁ, বাতিল নিশ্চিত করুন'),
           ),
         ],
       ),
@@ -1825,7 +2244,10 @@ class _HomeScreenState extends State<HomeScreen> {
           _dropoffController.clear();
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(res['message'] ?? 'রাইড সফলভাবে বাতিল করা হয়েছে')),
+          SnackBar(
+            backgroundColor: (res['cancellation_fee'] != null && (res['cancellation_fee'] as num) > 0) ? Colors.deepOrange : Colors.black87,
+            content: Text(res['message'] ?? 'রাইড সফলভাবে বাতিল করা হয়েছে'),
+          ),
         );
       }
     }

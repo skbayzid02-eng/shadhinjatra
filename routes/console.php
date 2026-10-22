@@ -6,3 +6,10 @@ use Illuminate\Support\Facades\Artisan;
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+Artisan::command('rides:cascade-dispatches', function (\App\Services\RideDispatchService $dispatchService) {
+    $cascaded = $dispatchService->cascadeExpiredDispatches();
+    $this->info("Processed ride dispatch cascades. Count: {$cascaded}");
+})->purpose('Cascade expired ride dispatches autonomously without relying on client timer');
+
+\Illuminate\Support\Facades\Schedule::command('rides:cascade-dispatches')->everyMinute();

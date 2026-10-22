@@ -9,6 +9,13 @@ class Ride extends Model
 {
     use HasFactory;
 
+    protected $attributes = [
+        'distance_km' => 0.0,
+        'fare_amount' => 0.0,
+        'payment_method' => 'cash',
+        'payment_status' => 'pending',
+    ];
+
     protected $fillable = [
         'user_id',
         'driver_id',
@@ -21,18 +28,43 @@ class Ride extends Model
         'vehicle_type',
         'distance_km',
         'fare_amount',
+        'commission_amount',
+        'driver_earnings',
+        'cancellation_fee',
+        'cancellation_reason',
+        'cancelled_by',
         'payment_method',
+        'payment_status',
         'status',
         'otp',
+        'otp_expires_at',
+        'accepted_at',
+        'arrived_at',
+        'started_at',
+        'completed_at',
         'dispatched_driver_id',
+        'dispatched_driver_ids',
         'dispatch_expires_at',
         'dispatch_attempt',
+        'search_radius_km',
         'rating',
         'feedback',
     ];
 
     protected $casts = [
+        'dispatched_driver_ids' => 'array',
         'dispatch_expires_at' => 'datetime',
+        'otp_expires_at' => 'datetime',
+        'accepted_at' => 'datetime',
+        'arrived_at' => 'datetime',
+        'started_at' => 'datetime',
+        'completed_at' => 'datetime',
+        'search_radius_km' => 'float',
+        'cancellation_fee' => 'float',
+        'fare_amount' => 'float',
+        'commission_amount' => 'float',
+        'driver_earnings' => 'float',
+        'distance_km' => 'float',
     ];
 
     public function passenger()

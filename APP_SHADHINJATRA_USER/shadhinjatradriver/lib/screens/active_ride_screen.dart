@@ -134,16 +134,102 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     }
   }
 
-  void _startTrip() async {
+  void _promptOtpAndStartTrip() {
+    final otpController = TextEditingController();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: const Row(
+          children: [
+            Icon(Icons.pin_rounded, color: Colors.green),
+            SizedBox(width: 8),
+            Text('যাত্রীর OTP দিন', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'যাত্রা শুরু করতে যাত্রীর মোবাইল অ্যাপে প্রদর্শিত ৬ সংখ্যার OTP কোডটি সংগ্রহ করুন:',
+              style: TextStyle(fontSize: 13, color: Colors.black87),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: otpController,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              autofocus: true,
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 4),
+              textAlign: TextAlign.center,
+              decoration: InputDecoration(
+                hintText: '• • • • • •',
+                counterText: '',
+                filled: true,
+                fillColor: Colors.grey.shade100,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.green, width: 2)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('বাতিল', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () {
+              final otp = otpController.text.trim();
+              if (otp.length != 6) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('অনুগ্রহ করে সঠিক ৬ সংখ্যার OTP লিখুন')));
+                return;
+              }
+              Navigator.pop(ctx);
+              _startTrip(otp);
+            },
+            child: const Text('যাত্রা শুরু করুন'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _startTrip(String otp) async {
+    final rideId = widget.rideData['id'];
+    if (rideId != null) {
+      final res = await AuthService.updateRideStatus(
+        rideId, 
+        'started', 
+        lat: _driverLocation?.latitude, 
+        lng: _driverLocation?.longitude,
+        otp: otp,
+      );
+
+      if (res['success'] == false) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red,
+              content: Text(res['message'] ?? 'ভুল OTP কোড! যাত্রা শুরু করা সম্ভব হয়নি।'),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
     _waitingTimer?.cancel();
     setState(() {
       _isTripStarted = true;
     });
-
-    final rideId = widget.rideData['id'];
-    if (rideId != null) {
-      await AuthService.updateRideStatus(rideId, 'started', lat: _driverLocation?.latitude, lng: _driverLocation?.longitude);
-    }
 
     // Switch route to dropoff destination
     final req = widget.rideData;
@@ -195,6 +281,53 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         ),
       );
     }
+  }
+
+  void _triggerSos() {
+    final rideId = widget.rideData['id'];
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            SizedBox(width: 8),
+            Text('জরুরি সহায়তা (SOS ৯৯৯)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          ],
+        ),
+        content: const Text('আপনি কি জরুরি সহায়তা (SOS) সংকেত পাঠাতে এবং নিরাপত্তা দলের সাথে যোগাযোগ করতে চান?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('না', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              if (rideId != null) {
+                final res = await AuthService.triggerSos(
+                  rideId is int ? rideId : int.tryParse(rideId.toString()) ?? 0,
+                  lat: _driverLocation?.latitude,
+                  lng: _driverLocation?.longitude,
+                  details: 'Driver triggered SOS emergency signal',
+                );
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      backgroundColor: Colors.red.shade700,
+                      content: Text(res['message'] ?? 'জরুরি অ্যালার্ট সংকেত পাঠানো হয়েছে! ৯৯৯ এ কল করুন।'),
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('হ্যাঁ, সংকেত পাঠান'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _cancelRide() {
@@ -315,8 +448,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                     heroTag: 'recenter_map',
                     mini: true,
                     backgroundColor: Colors.white,
-                    child: const Icon(Icons.my_location, color: Colors.black87),
                     onPressed: _fitMapBounds,
+                    child: const Icon(Icons.my_location, color: Colors.black87),
                   ),
                 ),
               ],
@@ -360,7 +493,12 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                         ],
                       ),
                     ),
-                    // Communication Buttons
+                    // Communication & Safety Buttons
+                    IconButton(
+                      icon: const Icon(Icons.shield_rounded, color: Colors.red),
+                      tooltip: 'SOS ৯৯৯',
+                      onPressed: _triggerSos,
+                    ),
                     IconButton(
                       icon: const Icon(Icons.call, color: Colors.green),
                       onPressed: () {
@@ -419,7 +557,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                       width: double.infinity,
                       height: 50,
                       child: ElevatedButton(
-                        onPressed: _startTrip,
+                        onPressed: _promptOtpAndStartTrip,
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.green, elevation: 0),
                         child: const Text('START TRIP (যাত্রা শুরু)', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
                       ),

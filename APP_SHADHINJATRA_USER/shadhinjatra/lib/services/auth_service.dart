@@ -6,9 +6,11 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io' show Platform;
 
 class AuthService {
+  static String? _resolvedWebBaseUrl;
+
   static String get baseUrl {
     if (kIsWeb) {
-      return 'http://127.0.0.1:8000/api';
+      return _resolvedWebBaseUrl ?? 'http://127.0.0.1:8000/api';
     }
     try {
       if (Platform.isAndroid) {
@@ -61,6 +63,30 @@ class AuthService {
         return jsonDecode(response.body);
       }
     } catch (e) {
+      if (kIsWeb && _resolvedWebBaseUrl == null) {
+        try {
+          const fallbackUrl = 'http://shadhinjatra.test/api';
+          final res2 = await http.post(
+            Uri.parse('$fallbackUrl/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'email': email,
+              'password': password,
+            }),
+          );
+          if (res2.statusCode == 200) {
+            final data = jsonDecode(res2.body);
+            if (data['success'] == true && data['token'] != null) {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('auth_token', data['token']);
+              _resolvedWebBaseUrl = fallbackUrl;
+            }
+            return data;
+          } else {
+            return jsonDecode(res2.body);
+          }
+        } catch (_) {}
+      }
       return {'success': false, 'message': 'Network error: $e'};
     }
   }
@@ -451,10 +477,92 @@ class AuthService {
     }
   }
 
-  static Future<Map<String, dynamic>> cancelCurrentRide(int rideId) async {
+  static Future<Map<String, dynamic>> fetchActiveRide() async {
+    return fetchRideTracking();
+  }
+
+  static Future<Map<String, dynamic>> fetchCancellationPreview(int rideId) async {
     final headers = await getHeaders();
     try {
-      final response = await http.post(Uri.parse('$baseUrl/rides/$rideId/cancel'), headers: headers);
+      final response = await http.get(Uri.parse('$baseUrl/rides/$rideId/cancellation-preview'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> cancelCurrentRide(int rideId, {String? reason}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rides/$rideId/cancel'), 
+        headers: headers,
+        body: jsonEncode({'reason': reason ?? 'যাত্রী কর্তৃক বাতিল'}),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> rateRide(int rideId, int rating, {String? feedback}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rides/$rideId/rate'),
+        headers: headers,
+        body: jsonEncode({
+          'rating': rating,
+          if (feedback != null && feedback.isNotEmpty) 'feedback': feedback,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> confirmPayment(int rideId, {String? paymentMethod}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rides/$rideId/payment/confirm'),
+        headers: headers,
+        body: jsonEncode({
+          if (paymentMethod != null) 'payment_method': paymentMethod,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> resendOtp(int rideId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rides/$rideId/resend-otp'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> triggerSos(int rideId, {double? lat, double? lng, String? details}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rides/$rideId/sos'),
+        headers: headers,
+        body: jsonEncode({
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+          if (details != null) 'details': details,
+        }),
+      );
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};

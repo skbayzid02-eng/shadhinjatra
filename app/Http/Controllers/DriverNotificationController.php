@@ -17,25 +17,28 @@ class DriverNotificationController extends Controller
     {
         $user = $request->user();
 
-        // Ride requests strictly appear only in Home page 'Nearby Ride Requests' and never in notifications
+        // 1. Auto-cleanup stale ride_request notifications whose rides are no longer pending or have expired
         Notification::where('user_id', $user->id)
             ->where('type', 'ride_request')
+            ->whereDoesntHave('ride', function ($query) {
+                $query->where('status', 'pending');
+            })
             ->delete();
 
-        // 1. Fetch latest driver notifications (excluding ride_request)
-        $notifications = Notification::with('ride')
+        // 2. Fetch latest driver notifications (including active ride_request)
+        $notifications = Notification::with(['ride.passenger'])
             ->where('user_id', $user->id)
-            ->where('type', '!=', 'ride_request')
             ->latest()
             ->take(50)
             ->get();
 
         $unreadCount = Notification::where('user_id', $user->id)
-            ->where('type', '!=', 'ride_request')
             ->where('is_read', false)
             ->count();
 
         $data = $notifications->map(function ($notif) {
+            $ride = $notif->ride;
+            $notifData = $notif->data ?? [];
             return [
                 'id' => $notif->id,
                 'ride_id' => $notif->ride_id,
@@ -45,8 +48,15 @@ class DriverNotificationController extends Controller
                 'is_read' => (bool) $notif->is_read,
                 'time' => $notif->created_at ? $notif->created_at->diffForHumans() : 'Just now',
                 'created_at' => $notif->created_at ? $notif->created_at->toIso8601String() : null,
-                'data' => $notif->data ?? [],
-                'ride_status' => $notif->ride ? $notif->ride->status : ($notif->type === 'ride_request' ? 'pending' : null),
+                'data' => $notifData,
+                'ride_status' => $ride ? $ride->status : ($notif->type === 'ride_request' ? 'pending' : null),
+                'pickup' => $notifData['pickup'] ?? ($ride?->pickup_location),
+                'dropoff' => $notifData['dropoff'] ?? ($ride?->dropoff_location),
+                'fare' => $notifData['fare'] ?? ($ride?->fare_amount),
+                'distance' => $notifData['distance'] ?? ($ride?->distance_km),
+                'passenger_name' => $notifData['passenger_name'] ?? ($ride?->passenger?->name ?? 'যাত্রী'),
+                'passenger_phone' => $notifData['passenger_phone'] ?? ($ride?->passenger?->phone ?? ''),
+                'expires_in' => $notifData['expires_in'] ?? 15,
             ];
         });
 
@@ -85,14 +95,16 @@ class DriverNotificationController extends Controller
 
     /**
      * Confirm / Accept a ride request directly from notification.
-     * When confirmed, this notification is automatically deleted from the database.
+     * When confirmed, this notification is automatically deleted and other drivers are dismissed.
      */
     public function confirmRideFromNotification(Request $request, $id)
     {
         $user = $request->user();
 
         $notification = Notification::where('user_id', $user->id)
-            ->where('id', $id)
+            ->where(function ($q) use ($id) {
+                $q->where('id', $id)->orWhere('ride_id', $id);
+            })
             ->first();
 
         if (!$notification) {
@@ -120,25 +132,29 @@ class DriverNotificationController extends Controller
             $notification->delete();
             return response()->json([
                 'success' => false,
-                'message' => 'Ride is no longer available (already accepted by someone else or cancelled).',
+                'message' => 'এই রাইডটি ইতিমধ্যে অন্য একজন চালক গ্রহণ করেছেন বা আর খালি নেই।',
                 'auto_deleted' => true,
             ], 400);
         }
 
         $hasOngoingRide = Ride::where('driver_id', $user->id)
-            ->where('status', 'ongoing')
+            ->whereIn('status', ['accepted', 'ongoing', 'started', 'arrived'])
             ->exists();
 
         if ($hasOngoingRide) {
             return response()->json([
                 'success' => false,
-                'message' => 'You already have an ongoing ride. Please complete it first.',
+                'message' => 'আপনার ইতিমধ্যে একটি সক্রিয় রাইড চলমান আছে। অনুগ্রহ করে সেটি শেষ করুন।',
             ], 400);
         }
 
         // 1. Confirm and accept the ride
         $ride->status = 'ongoing';
         $ride->driver_id = $user->id;
+        $ride->accepted_at = now();
+        $ride->dispatched_driver_id = null;
+        $ride->dispatched_driver_ids = null;
+        $ride->dispatch_expires_at = null;
         $ride->save();
 
         // 2. Save In-App Notification for Passenger
@@ -176,7 +192,7 @@ class DriverNotificationController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Ride confirmed successfully! Notification automatically deleted.',
+            'message' => 'রাইড সফলভাবে গ্রহণ (Accept) করা হয়েছে!',
             'auto_deleted' => true,
             'data' => [
                 'id' => $ride->id,
@@ -188,6 +204,51 @@ class DriverNotificationController extends Controller
                 'passenger_phone' => $ride->passenger->phone ?? '',
                 'status' => 'ongoing',
             ]
+        ]);
+    }
+
+    /**
+     * Reject a ride request directly from notification.
+     * Records rejection and cascades to next drivers.
+     */
+    public function rejectRideFromNotification(Request $request, $id)
+    {
+        $user = $request->user();
+
+        $notification = Notification::where('user_id', $user->id)
+            ->where(function ($q) use ($id) {
+                $q->where('id', $id)->orWhere('ride_id', $id);
+            })
+            ->first();
+
+        if (!$notification) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Notification not found.',
+            ], 404);
+        }
+
+        $rideId = $notification->ride_id ?? ($notification->data['ride_id'] ?? null);
+
+        // Delete the notification for this driver immediately
+        $notification->delete();
+
+        if ($rideId) {
+            $ride = Ride::find($rideId);
+            if ($ride && $ride->status === 'pending') {
+                $dispatchService = app(\App\Services\RideDispatchService::class);
+                $dispatchService->handleDriverRejection($ride, $user, 'rejected');
+            }
+        }
+
+        $unreadCount = Notification::where('user_id', $user->id)
+            ->where('is_read', false)
+            ->count();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'রাইড রিকোয়েস্ট সফলভাবে বাতিল (Reject) করা হয়েছে।',
+            'unread_count' => $unreadCount,
         ]);
     }
 

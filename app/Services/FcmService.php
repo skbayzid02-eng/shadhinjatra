@@ -57,7 +57,7 @@ class FcmService
             // Construct the API endpoint
             $url = "https://fcm.googleapis.com/v1/projects/{$projectId}/messages:send";
 
-            // Construct the payload
+            // Construct the payload with high priority, sound, and vibration for ride alerts
             $payload = [
                 'message' => [
                     'token' => $token,
@@ -65,7 +65,24 @@ class FcmService
                         'title' => $title,
                         'body' => $body,
                     ],
-                    'data' => $data,
+                    'android' => [
+                        'priority' => 'high',
+                        'notification' => [
+                            'sound' => 'default',
+                            'default_sound' => true,
+                            'default_vibrate_timings' => true,
+                            'channel_id' => 'ride_alerts_channel',
+                        ],
+                    ],
+                    'apns' => [
+                        'payload' => [
+                            'aps' => [
+                                'sound' => 'default',
+                                'badge' => 1,
+                            ],
+                        ],
+                    ],
+                    'data' => !empty($data) ? array_map('strval', $data) : new \stdClass(),
                 ],
             ];
 

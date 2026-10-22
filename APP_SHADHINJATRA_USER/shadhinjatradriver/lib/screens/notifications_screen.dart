@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shadhinjatradriver/services/auth_service.dart';
 import 'package:shadhinjatradriver/screens/active_ride_screen.dart';
 
@@ -16,6 +17,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   bool _notificationsEnabled = true;
   bool _isToggling = false;
   final Set<int> _confirmingIds = {};
+  final Set<int> _rejectingIds = {};
 
   @override
   void initState() {
@@ -29,7 +31,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       setState(() {
         _isLoading = false;
         if (result['success'] == true) {
-          _notifications = result['data'] ?? [];
+          final List<dynamic> fetched = result['data'] ?? [];
+          final bool hasNewRideRequest = fetched.any((item) => item['type'] == 'ride_request' && item['is_read'] != true);
+          if (hasNewRideRequest) {
+            // Play audible alert and haptic feedback for incoming ride request
+            SystemSound.play(SystemSoundType.alert);
+            HapticFeedback.heavyImpact();
+            Future.delayed(const Duration(milliseconds: 350), () {
+              SystemSound.play(SystemSoundType.alert);
+              HapticFeedback.heavyImpact();
+            });
+          }
+          _notifications = fetched;
           _unreadCount = result['unread_count'] ?? 0;
           _notificationsEnabled = result['notifications_enabled'] ?? true;
         }
@@ -155,6 +168,30 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ),
       );
     }
+  }
+
+  Future<void> _rejectRide(Map<String, dynamic> notif) async {
+    final int notifId = notif['id'];
+    setState(() {
+      _rejectingIds.add(notifId);
+    });
+
+    final result = await AuthService.rejectRideFromNotification(notifId);
+    if (!mounted) return;
+
+    setState(() {
+      _rejectingIds.remove(notifId);
+      _notifications.removeWhere((item) => item['id'] == notifId);
+      if (_unreadCount > 0) _unreadCount--;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result['message'] ?? 'রাইড রিকোয়েস্ট বাতিল করা হয়েছে।'),
+        backgroundColor: Colors.grey.shade800,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _deleteNotification(int notifId) async {
@@ -313,7 +350,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton(
+                      child: OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.red,
                           side: const BorderSide(color: Colors.red),
@@ -322,9 +359,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         ),
                         onPressed: () {
                           Navigator.pop(context);
-                          _deleteNotification(notif['id']);
+                          _rejectRide(notif);
                         },
-                        child: const Text('Dismiss', style: TextStyle(fontWeight: FontWeight.bold)),
+                        icon: const Icon(Icons.close_rounded, color: Colors.red, size: 20),
+                        label: const Text('Reject (বাতিল)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -341,25 +379,45 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           Navigator.pop(context);
                           _confirmRide(notif);
                         },
-                        icon: const Icon(Icons.check_circle, color: Colors.white),
-                        label: const Text('Confirm Ride (কনফার্ম)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        icon: const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                        label: const Text('Accept (গ্রহণ করুন)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                       ),
                     ),
                   ],
                 )
               else
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.red,
+                          side: const BorderSide(color: Colors.red),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _deleteNotification(notif['id']);
+                        },
+                        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                        label: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
                     ),
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Close', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Close', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
                 ),
             ],
           ),
@@ -750,15 +808,24 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                   child: Row(
                                     children: [
-                                      OutlinedButton(
+                                      OutlinedButton.icon(
                                         style: OutlinedButton.styleFrom(
-                                          foregroundColor: Colors.grey.shade700,
-                                          side: BorderSide(color: Colors.grey.shade300),
+                                          foregroundColor: Colors.red.shade700,
+                                          side: BorderSide(color: Colors.red.shade300),
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                                         ),
-                                        onPressed: () => _deleteNotification(notif['id']),
-                                        child: const Text('Dismiss', style: TextStyle(fontSize: 13)),
+                                        onPressed: (_confirmingIds.contains(notif['id']) || _rejectingIds.contains(notif['id']))
+                                            ? null
+                                            : () => _rejectRide(notif),
+                                        icon: _rejectingIds.contains(notif['id'])
+                                            ? const SizedBox(
+                                                width: 14,
+                                                height: 14,
+                                                child: CircularProgressIndicator(color: Colors.red, strokeWidth: 2),
+                                              )
+                                            : const Icon(Icons.close_rounded, size: 16, color: Colors.red),
+                                        label: const Text('REJECT (বাতিল)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                                       ),
                                       const SizedBox(width: 10),
                                       Expanded(
@@ -770,7 +837,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                             elevation: 1,
                                           ),
-                                          onPressed: isConfirming ? null : () => _confirmRide(notif),
+                                          onPressed: (_confirmingIds.contains(notif['id']) || _rejectingIds.contains(notif['id']))
+                                              ? null
+                                              : () => _confirmRide(notif),
                                           icon: isConfirming
                                               ? const SizedBox(
                                                   width: 18,
@@ -779,8 +848,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                                 )
                                               : const Icon(Icons.check_circle_rounded, size: 20, color: Colors.white),
                                           label: Text(
-                                            isConfirming ? 'Confirming...' : 'CONFIRM (কনফার্ম করুন)',
-                                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                                            isConfirming ? 'Accepting...' : 'ACCEPT (গ্রহণ করুন)',
+                                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                                           ),
                                         ),
                                       ),

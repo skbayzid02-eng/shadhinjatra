@@ -27,6 +27,10 @@ class RideRequestController extends Controller
             ], 422);
         }
 
+        $fare = (float) $request->fare_amount;
+        $commission = round($fare * 0.10, 2);
+        $driverEarnings = round($fare - $commission, 2);
+
         $ride = Ride::create([
             'user_id' => $request->user()->id,
             'pickup_location' => $request->pickup_location,
@@ -36,11 +40,14 @@ class RideRequestController extends Controller
             'dropoff_lat' => $request->dropoff_lat,
             'dropoff_lon' => $request->dropoff_lon,
             'vehicle_type' => $request->vehicle_type,
-            'fare_amount' => $request->fare_amount,
-            'payment_method' => $request->payment_method,
+            'fare_amount' => $fare,
+            'commission_amount' => $commission,
+            'driver_earnings' => $driverEarnings,
+            'payment_method' => strtolower($request->payment_method ?? 'cash'),
             'distance_km' => $request->distance_km ?? 0,
             'status' => 'pending',
             'otp' => (string) rand(100000, 999999),
+            'otp_expires_at' => now()->addMinutes(30),
         ]);
 
         // Create in-app notification for passenger
@@ -60,10 +67,10 @@ class RideRequestController extends Controller
             'is_read' => false,
         ]);
 
-        // Intelligently rank nearby drivers based on distance, rating, and experience,
-        // and dispatch to the #1 most suitable driver first with timeout window
+        // Intelligently rank nearby verified, online drivers with active subscription,
+        // and dispatch simultaneously to the top 3 closest drivers within radius with 15s window
         $dispatchService = app(\App\Services\RideDispatchService::class);
-        $assignedDriver = $dispatchService->dispatchToNextDriver($ride);
+        $assignedBatch = $dispatchService->dispatchToNextBatch($ride);
 
         // Broadcast to drivers
         \App\Events\RideRequested::dispatch($ride);
@@ -72,8 +79,10 @@ class RideRequestController extends Controller
             'success' => true,
             'message' => 'Ride requested successfully',
             'data' => array_merge($ride->toArray(), [
-                'dispatched_driver_id' => $assignedDriver ? $assignedDriver->id : null,
+                'dispatched_driver_ids' => $ride->dispatched_driver_ids,
                 'dispatch_expires_at' => $ride->dispatch_expires_at,
+                'search_radius_km' => $ride->search_radius_km,
+                'batch_count' => $assignedBatch->count(),
             ])
         ], 201);
     }

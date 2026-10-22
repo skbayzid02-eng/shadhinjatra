@@ -27,10 +27,16 @@ class RideChatController extends Controller
             ->orderBy('created_at', 'asc')
             ->get()
             ->map(function ($msg) use ($user) {
+                $isMe = ($msg->sender_id === $user->id);
                 return [
                     'id' => $msg->id,
+                    'sender' => $isMe ? 'me' : 'passenger',
+                    'sender_id' => $msg->sender_id,
+                    'receiver_id' => $msg->receiver_id,
                     'text' => $msg->message,
-                    'is_me' => $msg->sender_id === $user->id,
+                    'message' => $msg->message,
+                    'is_me' => $isMe,
+                    'is_read' => (bool) $msg->is_read,
                     'time' => $msg->created_at->format('h:i A'),
                 ];
             });

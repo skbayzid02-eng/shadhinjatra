@@ -48,6 +48,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/rides/{id}/tracking', [\App\Http\Controllers\Api\RideController::class, 'tracking']);
     Route::post('/rides/{id}/status', [\App\Http\Controllers\Api\RideController::class, 'updateRideStatus']);
     Route::post('/rides/{id}/cancel', [\App\Http\Controllers\Api\RideController::class, 'cancel']);
+    Route::get('/rides/{id}/cancellation-preview', [\App\Http\Controllers\Api\RideController::class, 'cancellationPreview']);
+    Route::post('/rides/{id}/payment/confirm', [\App\Http\Controllers\Api\RideController::class, 'confirmPayment']);
+    Route::post('/rides/{id}/resend-otp', [\App\Http\Controllers\Api\RideController::class, 'resendOtp']);
+    Route::post('/rides/{id}/sos', [\App\Http\Controllers\Api\RideController::class, 'sosAlert']);
     Route::post('/rides/{id}/simulate', [\App\Http\Controllers\Api\RideController::class, 'simulateDriver']);
     Route::post('/rides/{id}/rate', [\App\Http\Controllers\Api\RideController::class, 'rateRide']);
     Route::get('/map/nearby-drivers', [\App\Http\Controllers\Api\RideController::class, 'nearbyDrivers']);
@@ -67,17 +71,22 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/driver/ride/{id}/accept', [\App\Http\Controllers\DriverHomeController::class, 'acceptRide']);
     Route::post('/driver/ride/{id}/reject', [\App\Http\Controllers\DriverHomeController::class, 'rejectRide']);
     Route::post('/driver/ride/{id}/timeout', [\App\Http\Controllers\DriverHomeController::class, 'timeoutRide']);
+    Route::get('/driver/ride/{id}/status', [\App\Http\Controllers\DriverHomeController::class, 'checkRideStatus']);
     
     // Driver Notification Endpoints
     Route::get('/driver/notifications', [\App\Http\Controllers\DriverNotificationController::class, 'index']);
     Route::post('/driver/notifications/toggle', [\App\Http\Controllers\DriverNotificationController::class, 'toggleNotifications']);
     Route::post('/driver/notifications/{id}/confirm', [\App\Http\Controllers\DriverNotificationController::class, 'confirmRideFromNotification']);
+    Route::post('/driver/notifications/{id}/accept', [\App\Http\Controllers\DriverNotificationController::class, 'confirmRideFromNotification']);
+    Route::post('/driver/notifications/{id}/reject', [\App\Http\Controllers\DriverNotificationController::class, 'rejectRideFromNotification']);
     Route::post('/driver/notifications/{id}/read', [\App\Http\Controllers\DriverNotificationController::class, 'markAsRead']);
     Route::post('/driver/notifications/mark-read', [\App\Http\Controllers\DriverNotificationController::class, 'markAllAsRead']);
     Route::delete('/driver/notifications/{id}', [\App\Http\Controllers\DriverNotificationController::class, 'destroy']);
     
     // Driver Navigation Endpoints
     Route::get('/driver/earnings', [\App\Http\Controllers\DriverDashboardController::class, 'earnings']);
+    Route::post('/driver/withdraw', [\App\Http\Controllers\DriverDashboardController::class, 'requestWithdrawal']);
+    Route::get('/driver/withdrawals', [\App\Http\Controllers\DriverDashboardController::class, 'withdrawals']);
     Route::get('/driver/rides', [\App\Http\Controllers\DriverDashboardController::class, 'rides']);
     Route::get('/driver/account', [\App\Http\Controllers\DriverDashboardController::class, 'account']);
     

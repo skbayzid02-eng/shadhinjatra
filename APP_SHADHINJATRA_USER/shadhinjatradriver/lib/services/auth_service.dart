@@ -6,9 +6,11 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io' show Platform;
 
 class AuthService {
+  static String? _resolvedWebBaseUrl;
+
   static String get baseUrl {
     if (kIsWeb) {
-      return 'http://127.0.0.1:8000/api';
+      return _resolvedWebBaseUrl ?? 'http://127.0.0.1:8000/api';
     }
     try {
       if (Platform.isAndroid) {
@@ -52,6 +54,30 @@ class AuthService {
         return jsonDecode(response.body);
       }
     } catch (e) {
+      if (kIsWeb && _resolvedWebBaseUrl == null) {
+        try {
+          const fallbackUrl = 'http://shadhinjatra.test/api';
+          final res2 = await http.post(
+            Uri.parse('$fallbackUrl/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'email': email,
+              'password': password,
+            }),
+          );
+          if (res2.statusCode == 200) {
+            final data = jsonDecode(res2.body);
+            if (data['success'] == true && data['token'] != null) {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('auth_token', data['token']);
+              _resolvedWebBaseUrl = fallbackUrl;
+            }
+            return data;
+          } else {
+            return jsonDecode(res2.body);
+          }
+        } catch (_) {}
+      }
       return {'success': false, 'message': 'Network error: $e'};
     }
   }
@@ -88,6 +114,17 @@ class AuthService {
   static Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
+    await prefs.remove('driver_is_online_pref');
+  }
+
+  static Future<void> setLocalOnlinePreference(bool isOnline) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('driver_is_online_pref', isOnline);
+  }
+
+  static Future<bool> getLocalOnlinePreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('driver_is_online_pref') ?? false;
   }
 
   static Future<bool> isLoggedIn() async {
@@ -115,7 +152,12 @@ class AuthService {
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
-        return {'success': false, 'message': 'Failed to load data'};
+        try {
+          final data = jsonDecode(response.body);
+          return {'success': false, 'message': data['message'] ?? 'Failed to load data (${response.statusCode})'};
+        } catch (_) {
+          return {'success': false, 'message': 'Failed to load data (${response.statusCode})'};
+        }
       }
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};
@@ -139,14 +181,23 @@ class AuthService {
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
-        return {'success': false, 'message': 'Failed to load nearby requests'};
+        try {
+          final data = jsonDecode(response.body);
+          return {'success': false, 'message': data['message'] ?? 'Failed to load nearby requests'};
+        } catch (_) {
+          return {'success': false, 'message': 'Failed to load nearby requests'};
+        }
       }
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};
     }
   }
 
-  static Future<Map<String, dynamic>> updateDriverStatus(bool isOnline) async {
+  static Future<Map<String, dynamic>> updateDriverStatus(
+    bool isOnline, {
+    String? reason,
+    bool? gpsEnabled,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     if (token == null) return {'success': false, 'message': 'Not logged in'};
@@ -159,16 +210,25 @@ class AuthService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: jsonEncode({'is_online': isOnline}),
+        body: jsonEncode({
+          'is_online': isOnline,
+          if (reason != null) 'reason': reason,
+          if (gpsEnabled != null) 'gps_enabled': gpsEnabled,
+        }),
       );
 
       return jsonDecode(response.body);
     } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
+      return {'success': false, 'network_error': true, 'message': 'Network error: $e'};
     }
   }
 
-  static Future<Map<String, dynamic>> sendHeartbeat() async {
+  static Future<Map<String, dynamic>> sendHeartbeat({
+    bool isBackground = false,
+    bool gpsEnabled = true,
+    double? lat,
+    double? lng,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     if (token == null) return {'success': false, 'message': 'Not logged in'};
@@ -181,15 +241,29 @@ class AuthService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
+        body: jsonEncode({
+          'is_background': isBackground,
+          'gps_enabled': gpsEnabled,
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+        }),
       );
 
       return jsonDecode(response.body);
     } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
+      return {'success': false, 'network_error': true, 'message': 'Network error: $e'};
     }
   }
 
-  static Future<Map<String, dynamic>?> updateDriverLocation(double lat, double lng) async {
+  static Future<Map<String, dynamic>?> updateDriverLocation(
+    double lat,
+    double lng, {
+    double? heading,
+    double? speed,
+    double? accuracy,
+    bool isBackground = false,
+    bool gpsEnabled = true,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     if (token == null) return null;
@@ -202,16 +276,24 @@ class AuthService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: jsonEncode({'latitude': lat, 'longitude': lng}),
+        body: jsonEncode({
+          'latitude': lat,
+          'longitude': lng,
+          if (heading != null) 'heading': heading,
+          if (speed != null) 'speed': speed,
+          if (accuracy != null) 'accuracy': accuracy,
+          'is_background': isBackground,
+          'gps_enabled': gpsEnabled,
+        }),
       );
 
       return jsonDecode(response.body);
     } catch (e) {
-      return null;
+      return {'success': false, 'network_error': true, 'message': 'Network error: $e'};
     }
   }
 
-  static Future<Map<String, dynamic>> updateRideStatus(int rideId, String status, {double? lat, double? lng}) async {
+  static Future<Map<String, dynamic>> updateRideStatus(int rideId, String status, {double? lat, double? lng, String? otp}) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     if (token == null) return {'success': false, 'message': 'Not logged in'};
@@ -228,6 +310,7 @@ class AuthService {
           'status': status,
           if (lat != null) 'latitude': lat,
           if (lng != null) 'longitude': lng,
+          if (otp != null) 'otp': otp,
         }),
       );
 
@@ -297,6 +380,26 @@ class AuthService {
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> checkRideStatus(int rideId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/ride/$rideId/status'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
     }
   }
 
@@ -455,6 +558,26 @@ class AuthService {
     }
   }
 
+  static Future<Map<String, dynamic>> rejectRideFromNotification(int id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/notifications/$id/reject'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error'};
+    }
+  }
+
   static Future<Map<String, dynamic>> deleteNotification(int id) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
@@ -530,4 +653,130 @@ class AuthService {
       return {'success': false, 'message': 'Network error'};
     }
   }
-}
+
+  static Future<Map<String, dynamic>> triggerSos(int rideId, {double? lat, double? lng, String? details}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rides/$rideId/sos'),
+        headers: headers,
+        body: jsonEncode({
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+          if (details != null) 'details': details,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> confirmPayment(int rideId, {String? paymentMethod}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rides/$rideId/payment/confirm'),
+        headers: headers,
+        body: jsonEncode({
+          if (paymentMethod != null) 'payment_method': paymentMethod,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchRides({String? status}) async {
+    final headers = await getHeaders();
+    try {
+      final uri = Uri.parse('$baseUrl/driver/rides${status != null ? '?status=$status' : ''}');
+      final response = await http.get(uri, headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> requestWithdrawal({
+    required double amount,
+    required String paymentMethod,
+    required String accountNumber,
+    String? bankName,
+    String? branchName,
+    String? accountHolderName,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/withdraw'),
+        headers: headers,
+        body: jsonEncode({
+          'amount': amount,
+          'payment_method': paymentMethod,
+          'account_number': accountNumber,
+          if (bankName != null) 'bank_name': bankName,
+          if (branchName != null) 'branch_name': branchName,
+          if (accountHolderName != null) 'account_holder_name': accountHolderName,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchWithdrawals() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/withdrawals'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchChats() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/chats'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchChatMessages(int rideId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/chats/$rideId'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> sendChatMessage(int rideId, String message) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/chats/$rideId/send'),
+        headers: headers,
+        body: jsonEncode({'message': message}),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+}

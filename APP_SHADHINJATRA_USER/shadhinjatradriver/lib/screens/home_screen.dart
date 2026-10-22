@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shadhinjatradriver/services/auth_service.dart';
@@ -17,7 +18,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Map<String, dynamic>? _homeData;
   bool _isLoading = true;
   String _errorMessage = '';
@@ -41,13 +42,87 @@ class _HomeScreenState extends State<HomeScreen> {
   List<dynamic> activeRequests = [];
   int _unreadNotificationsCount = 0;
   bool _notificationsEnabled = true;
+  int? _activeModalRideId;
+  BuildContext? _activeModalContext;
+  bool _isInBackground = false;
+  DateTime? _lastGpsUpdateTime;
+  LocationPermission? _locationPermission;
+  bool _isNetworkDisconnected = false;
+  int _consecutiveNetworkFailures = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkLocationPermissionStatus();
     _loadData();
     _loadStats();
     _startRequestsPolling();
+    _checkAutoOnlineOnStartup();
+  }
+
+  Future<void> _checkLocationPermissionStatus() async {
+    try {
+      final perm = await Geolocator.checkPermission();
+      if (mounted) {
+        setState(() {
+          _locationPermission = perm;
+        });
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.hidden) {
+      // Driver minimized app or switched apps: MUST NOT go offline!
+      _isInBackground = true;
+      if (_isOnline) {
+        // Send background beacon to server: Driver is still active in background
+        _updateLocation(isBackground: true);
+        AuthService.sendHeartbeat(
+          isBackground: true,
+          gpsEnabled: true,
+          lat: _currentPosition?.latitude,
+          lng: _currentPosition?.longitude,
+        );
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      // Driver returned to foreground from minimized/background state
+      // Never drop offline accidentally; refresh immediate active state
+      _isInBackground = false;
+      _checkLocationPermissionStatus();
+      if (_isOnline) {
+        _pollNearbyRequests();
+        _updateLocation(isBackground: false);
+        AuthService.sendHeartbeat(
+          isBackground: false,
+          gpsEnabled: true,
+          lat: _currentPosition?.latitude,
+          lng: _currentPosition?.longitude,
+        );
+      }
+      _loadData(silent: true);
+    } else if (state == AppLifecycleState.detached) {
+      // App explicitly closed or terminated by driver
+      if (_isOnline) {
+        AuthService.updateDriverStatus(false, reason: 'app_closed');
+      }
+    }
+  }
+
+  Future<void> _checkAutoOnlineOnStartup() async {
+    final shouldBeOnline = await AuthService.getLocalOnlinePreference();
+    if (shouldBeOnline && mounted) {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      LocationPermission permission = await Geolocator.checkPermission();
+      _locationPermission = permission;
+      if (serviceEnabled &&
+          (permission == LocationPermission.always || permission == LocationPermission.whileInUse)) {
+        _goOnline();
+      }
+    }
   }
 
   void _startRequestsPolling() {
@@ -74,6 +149,30 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         activeRequests = filtered;
       });
+
+      // 1. If an incoming ride modal is currently open on this driver's screen,
+      // verify if that ride has been accepted by another driver or has expired.
+      // If it is no longer in filtered, immediately close this driver's modal!
+      if (_activeModalRideId != null) {
+        final bool stillAvailable = filtered.any((r) => r['id'] == _activeModalRideId);
+        if (!stillAvailable) {
+          _closeIncomingRideModalIfTakenByOther(_activeModalRideId!);
+        }
+      }
+
+      // 2. Automatically pop up high-priority incoming ride request modal when a new request arrives
+      if (filtered.isNotEmpty && _homeData?['active_ride'] == null) {
+        final newReq = filtered.first;
+        final newRideId = newReq['id'];
+        if (_activeModalRideId != newRideId && !_rejectedRideIds.contains(newRideId)) {
+          _activeModalRideId = newRideId;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _isOnline && _activeModalRideId == newRideId) {
+              _showIncomingRideModal(newReq);
+            }
+          });
+        }
+      }
     }
   }
   
@@ -84,7 +183,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isStatsLoading = false;
         if (result['success'] == true && result['data'] != null) {
-          _earningsDisplay = result['data']['total_earnings']?.toString() ?? '0';
+          _earningsDisplay = (result['data']['net_earnings'] ?? result['data']['total_earnings'] ?? '0').toString();
           _ridesDisplay = result['data']['total_rides']?.toString() ?? '0';
           _distanceDisplay = result['data']['total_distance']?.toString() ?? '0';
         }
@@ -94,6 +193,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // Note: Do NOT call _goOffline() here so minimizing or switching screens doesn't disconnect driver
     _requestsPollingTimer?.cancel();
     _locationTimer?.cancel();
@@ -240,6 +340,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
 
     if (res['success'] == true) {
+      await AuthService.setLocalOnlinePreference(true);
+      if (!mounted) return;
       setState(() {
         _isOnline = true;
       });
@@ -256,6 +358,8 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     } else {
+      await AuthService.setLocalOnlinePreference(false);
+      if (!mounted) return;
       setState(() {
         _isOnline = false;
       });
@@ -348,6 +452,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _goOffline() async {
     _stopActiveTimers();
     _requestsPollingTimer?.cancel();
+    await AuthService.setLocalOnlinePreference(false);
     
     setState(() {
       _isOnline = false;
@@ -380,15 +485,54 @@ class _HomeScreenState extends State<HomeScreen> {
     _locationTimer?.cancel();
     _locationTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       if (mounted && _isOnline) {
-        _updateLocation();
+        _updateLocation(isBackground: _isInBackground);
       }
     });
 
-    // Heartbeat Timer every 30 seconds to maintain server connection
+    // Heartbeat Timer every 20 seconds to maintain server connection and verify liveness
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 20), (timer) async {
       if (mounted && _isOnline) {
-        AuthService.sendHeartbeat();
+        // Check if GPS was turned off
+        bool gpsOk = await Geolocator.isLocationServiceEnabled();
+        if (!gpsOk) {
+          _handleGpsDisabled();
+          return;
+        }
+
+        final hbRes = await AuthService.sendHeartbeat(
+          isBackground: _isInBackground,
+          gpsEnabled: true,
+          lat: _currentPosition?.latitude,
+          lng: _currentPosition?.longitude,
+        );
+
+        if (!mounted) return;
+
+        if (hbRes['network_error'] == true) {
+          _consecutiveNetworkFailures++;
+          if (_consecutiveNetworkFailures >= 2 && !_isNetworkDisconnected) {
+            setState(() {
+              _isNetworkDisconnected = true;
+            });
+          }
+        } else {
+          if (_isNetworkDisconnected) {
+            setState(() {
+              _isNetworkDisconnected = false;
+            });
+          }
+          _consecutiveNetworkFailures = 0;
+
+          // If server returned offline status (e.g. timeout or admin action)
+          if (hbRes['is_online'] == false && _isOnline) {
+            setState(() {
+              _isOnline = false;
+              activeRequests.clear();
+            });
+            _stopActiveTimers();
+          }
+        }
       }
     });
   }
@@ -399,29 +543,173 @@ class _HomeScreenState extends State<HomeScreen> {
     _heartbeatTimer?.cancel();
   }
 
-  Future<void> _updateLocation() async {
+  void _handleGpsDisabled() {
+    if (!_isOnline) return;
+
+    _stopActiveTimers();
+    _requestsPollingTimer?.cancel();
+    AuthService.setLocalOnlinePreference(false);
+    AuthService.updateDriverStatus(false, reason: 'gps_disabled', gpsEnabled: false);
+
+    if (mounted) {
+      setState(() {
+        _isOnline = false;
+        activeRequests.clear();
+        _onlineDurationSeconds = 0;
+      });
+
+      _showPermissionDialog(
+        title: 'GPS বন্ধ হয়ে গেছে (GPS Disabled)',
+        message: 'ফোনের GPS বা লোকেশন সার্ভিস বন্ধ হওয়ায় ড্রাইভার স্ট্যাটাস স্বয়ংক্রিয়ভাবে অফলাইন করা হয়েছে। অনলাইনে যেতে GPS চালু করুন।',
+        actionText: 'GPS চালু করুন',
+        onAction: () async {
+          Navigator.pop(context);
+          await Geolocator.openLocationSettings();
+        },
+      );
+    }
+  }
+
+  Future<void> _updateLocation({bool isBackground = false}) async {
+    if (!_isOnline) return;
+
+    // 1. Verify GPS service is active
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      _handleGpsDisabled();
+      return;
+    }
+
     try {
       Position position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 8),
+        ),
       );
       if (mounted) {
         setState(() {
           _currentPosition = position;
+          _lastGpsUpdateTime = DateTime.now();
+          _isNetworkDisconnected = false;
+          _consecutiveNetworkFailures = 0;
         });
       }
-      final res = await AuthService.updateDriverLocation(position.latitude, position.longitude);
+      final res = await AuthService.updateDriverLocation(
+        position.latitude,
+        position.longitude,
+        heading: position.heading,
+        speed: position.speed,
+        accuracy: position.accuracy,
+        isBackground: isBackground || _isInBackground,
+        gpsEnabled: true,
+      );
       
-      if (res != null && res['success'] == true && res['active_requests'] != null && _isOnline) {
-        if (mounted) {
-          final List<dynamic> fetched = res['active_requests'] ?? [];
-          setState(() {
-            activeRequests = fetched.where((req) => !_rejectedRideIds.contains(req['id'])).toList();
-          });
+      if (res != null) {
+        if (res['network_error'] == true) {
+          _consecutiveNetworkFailures++;
+          if (_consecutiveNetworkFailures >= 2 && !_isNetworkDisconnected && mounted) {
+            setState(() => _isNetworkDisconnected = true);
+          }
+        } else {
+          if (_isNetworkDisconnected && mounted) {
+            setState(() => _isNetworkDisconnected = false);
+          }
+          _consecutiveNetworkFailures = 0;
+        }
+
+        if (res['success'] == true && res['active_requests'] != null && _isOnline) {
+          if (mounted) {
+            final List<dynamic> fetched = res['active_requests'] ?? [];
+            setState(() {
+              activeRequests = fetched.where((req) => !_rejectedRideIds.contains(req['id'])).toList();
+            });
+          }
         }
       }
     } catch (e) {
-      // Background location update handled silently
+      // Check if GPS was disabled
+      bool isGpsOn = await Geolocator.isLocationServiceEnabled();
+      if (!isGpsOn) {
+        _handleGpsDisabled();
+        return;
+      }
+
+      // Fallback: If getCurrentPosition times out (e.g. while minimized/backgrounded), try last known position
+      try {
+        Position? lastPos = await Geolocator.getLastKnownPosition();
+        if (lastPos != null) {
+          if (mounted) {
+            setState(() {
+              _currentPosition = lastPos;
+              _lastGpsUpdateTime = DateTime.now();
+            });
+          }
+          await AuthService.updateDriverLocation(
+            lastPos.latitude,
+            lastPos.longitude,
+            heading: lastPos.heading,
+            speed: lastPos.speed,
+            accuracy: lastPos.accuracy,
+            isBackground: isBackground || _isInBackground,
+            gpsEnabled: true,
+          );
+        }
+      } catch (_) {}
     }
+  }
+
+  Widget _buildNetworkDisconnectedBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFD32F2F),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.red.withValues(alpha: 0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.wifi_off_rounded, color: Colors.white, size: 20),
+          SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'ইন্টারনেট সংযোগ বিচ্ছিন্ন (Internet Disconnected)',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'পুনরায় সংযোগের চেষ্টা চলছে... সংযোগ ফিরলে স্ট্যাটাস আপডেট হবে।',
+                  style: TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatLastGpsTime() {
+    if (_lastGpsUpdateTime == null) return 'অপেক্ষমান...';
+    final diff = DateTime.now().difference(_lastGpsUpdateTime!).inSeconds;
+    if (diff < 5) return 'এইমাত্র';
+    if (diff < 60) return '$diff সে. আগে';
+    return '${diff ~/ 60} মি. আগে';
   }
 
   String _formatDuration(int seconds) {
@@ -611,6 +899,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDashboard() {
+    final activeRide = _homeData?['active_ride'];
+
     return RefreshIndicator(
       onRefresh: () async {
         await _loadData(silent: false);
@@ -619,9 +909,27 @@ class _HomeScreenState extends State<HomeScreen> {
       child: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         children: [
+          // Network Disconnected Banner
+          if (_isNetworkDisconnected) ...[
+            _buildNetworkDisconnectedBanner(),
+            const SizedBox(height: 12),
+          ],
+
+          // Ongoing Active Ride Banner (Prominent restoration banner)
+          if (activeRide != null) ...[
+            _buildActiveOngoingRideBanner(activeRide),
+            const SizedBox(height: 12),
+          ],
+
           // Online Status Hero Ribbon (Compact, Modern, No Wasted Space)
           _buildOnlineStatusRibbon(),
           const SizedBox(height: 12),
+
+          // Live GPS & Background Location Tracking Card
+          if (_isOnline) ...[
+            _buildGpsBackgroundStatusCard(),
+            const SizedBox(height: 12),
+          ],
 
           // Ride & Earnings History Section
           _buildStatsSection(),
@@ -630,6 +938,133 @@ class _HomeScreenState extends State<HomeScreen> {
           // Nearby Ride Requests Section
           _buildNearbyRideRequestsSection(),
           const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActiveOngoingRideBanner(Map<String, dynamic> activeRide) {
+    final status = activeRide['status']?.toString() ?? 'accepted';
+    String statusTitle = 'যাত্রীর উদ্দেশ্যে রওনা';
+    Color badgeColor = Colors.orange;
+    IconData statusIcon = Icons.navigation_rounded;
+
+    if (status == 'arrived') {
+      statusTitle = 'পিকআপে পৌঁছেছেন (OTP যাচাই করুন)';
+      badgeColor = Colors.blue;
+      statusIcon = Icons.pin_drop_rounded;
+    } else if (status == 'started' || status == 'ongoing') {
+      statusTitle = 'রাইড চলমান রয়েছে';
+      badgeColor = Colors.green;
+      statusIcon = Icons.directions_car_rounded;
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.orange.shade400, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.orange.withValues(alpha: 0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Banner Top Bar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(statusIcon, color: badgeColor, size: 16),
+                    const SizedBox(width: 6),
+                    Text(
+                      'চলমান রাইড (Ongoing Ride)',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.brown.shade800),
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: badgeColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    statusTitle,
+                    style: TextStyle(color: badgeColor, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Passenger Info & Trip Action
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: Colors.orange.shade100,
+                  backgroundImage: activeRide['passenger_avatar'] != null
+                      ? NetworkImage(activeRide['passenger_avatar'])
+                      : null,
+                  child: activeRide['passenger_avatar'] == null
+                      ? const Icon(Icons.person, color: Colors.orange, size: 22)
+                      : null,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        activeRide['passenger_name'] ?? 'Passenger',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'ভাড়া: ${activeRide['fare']} • দূরত্ব: ${activeRide['distance']}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                      ),
+                    ],
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => ActiveRideScreen(rideData: activeRide)),
+                    ).then((_) {
+                      _loadData(silent: true);
+                      _loadStats();
+                    });
+                  },
+                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                  label: const Text('রাইডে যান', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.deepOrange,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    elevation: 1,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -716,6 +1151,140 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildGpsBackgroundStatusCard() {
+    final bool isAlways = (_locationPermission == LocationPermission.always);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isAlways ? Colors.blue.shade200 : Colors.teal.shade200,
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.teal.shade50,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.gps_fixed_rounded, color: Colors.teal, size: 18),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          'GPS লাইভ ট্র্যাকিং সক্রিয়',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: Colors.teal.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Text(
+                            'লাইভ',
+                            style: TextStyle(color: Colors.teal, fontSize: 9, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      _currentPosition != null
+                          ? '${_currentPosition!.latitude.toStringAsFixed(4)}°, ${_currentPosition!.longitude.toStringAsFixed(4)}° (নির্ভুলতা: ±${_currentPosition!.accuracy.toStringAsFixed(0)}মি.)'
+                          : 'GPS স্থানাঙ্ক প্রাপ্ত হচ্ছে...',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  const Text('সর্বশেষ সিঙ্ক', style: TextStyle(fontSize: 9, color: Colors.grey)),
+                  Text(
+                    _formatLastGpsTime(),
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: isAlways ? Colors.green.shade50 : Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isAlways ? Colors.green.shade200 : Colors.blue.shade100,
+                width: 0.8,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isAlways ? Icons.verified_user_rounded : Icons.info_outline_rounded,
+                  size: 15,
+                  color: isAlways ? Colors.green.shade700 : Colors.blue.shade700,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    isAlways
+                        ? 'ব্যাকগ্রাউন্ড পারমিশন চালু: অ্যাপ মিনিমাইজ থাকলেও লোকেশন অবিচ্ছিন্নভাবে আপডেট হবে।'
+                        : 'অ্যাপ মিনিমাইজ বা স্ক্রিন বন্ধ থাকলেও সার্ভারে ব্যাকগ্রাউন্ড লোকেশন আপডেট হবে।',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: isAlways ? Colors.green.shade900 : Colors.blue.shade900,
+                    ),
+                  ),
+                ),
+                if (!isAlways)
+                  InkWell(
+                    onTap: () => Geolocator.openAppSettings(),
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Text(
+                        'অনুমতি',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade800,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStatsSection() {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -772,8 +1341,8 @@ class _HomeScreenState extends State<HomeScreen> {
               children: _filterOptions.map((days) {
                 final isSelected = _selectedStatsDays == days;
                 final name = days == 1 
-                    ? 'Today (আজ)' 
-                    : (days == 30 ? '30 Days (১ মাস)' : '$days Days ($days দিন)');
+                    ? 'আজ (দৈনিক)' 
+                    : (days == 30 ? '৩০ দিন (মাসিক)' : '$days দিন');
                 return Padding(
                   padding: const EdgeInsets.only(right: 6.0),
                   child: ChoiceChip(
@@ -811,7 +1380,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     Expanded(
                       child: _buildMetricCard(
-                        title: 'মোট আয়',
+                        title: 'প্রকৃত আয়',
                         value: '৳$_earningsDisplay',
                         icon: Icons.account_balance_wallet_rounded,
                         color: Colors.green,
@@ -921,18 +1490,54 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 8),
 
-        // Requests Content: Offline / Empty / Cards List
-        if (!_isOnline)
+        // Requests Content: Ongoing Ride / Offline / Empty / Cards List
+        if (_homeData?['active_ride'] != null)
+          _buildActiveRideNoticeCard()
+        else if (!_isOnline)
           _buildOfflineNoticeCard()
         else if (activeRequests.isEmpty)
           _buildEmptyRequestsCard()
         else
           ...activeRequests.map((req) => RideRequestCard(
+                key: ValueKey('ride_${req['id']}'),
                 requestData: req,
                 onAccept: () => _handleAcceptRide(req),
                 onReject: () => _handleRejectRide(req['id']),
+                onTimeout: () => _handleTimeoutRide(req['id']),
               )),
       ],
+    );
+  }
+
+  Widget _buildActiveRideNoticeCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: Colors.orange.shade50, shape: BoxShape.circle),
+            child: const Icon(Icons.lock_clock_rounded, size: 28, color: Colors.deepOrange),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'একটি রাইড ইতিমধ্যে চলমান রয়েছে',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'বর্তমান রাইডটি সম্পন্ন হওয়ার পর স্বয়ংক্রিয়ভাবে নতুন রাইড রিকোয়েস্ট আসবে।',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
     );
   }
 
@@ -1008,6 +1613,147 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _closeIncomingRideModalIfTakenByOther(int rideId) {
+    if (_activeModalRideId == rideId) {
+      _activeModalRideId = null;
+      if (_activeModalContext != null) {
+        try {
+          if (Navigator.canPop(_activeModalContext!)) {
+            Navigator.pop(_activeModalContext!);
+          }
+        } catch (_) {}
+        _activeModalContext = null;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.person_off_rounded, color: Colors.white, size: 22),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'অন্য একজন ড্রাইভার রাইডটি গ্রহণ করেছেন। আপনার স্ক্রিন থেকে রিকোয়েস্টটি বন্ধ করা হয়েছে।',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.deepOrange,
+            duration: Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showIncomingRideModal(Map<String, dynamic> req) {
+    // Play urgent sound alert and haptic feedback
+    SystemSound.play(SystemSoundType.alert);
+    HapticFeedback.heavyImpact();
+    Future.delayed(const Duration(milliseconds: 350), () {
+      SystemSound.play(SystemSoundType.alert);
+      HapticFeedback.heavyImpact();
+    });
+
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        _activeModalContext = ctx;
+        return Container(
+          padding: const EdgeInsets.only(top: 8, left: 14, right: 14, bottom: 24),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            boxShadow: [
+              BoxShadow(color: Colors.black26, blurRadius: 20, spreadRadius: 4),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+              ),
+              // Dispatch Batch Indicator Banner
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.deepOrange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.deepOrange.shade200),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.bolt, color: Colors.deepOrange, size: 18),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'একইসঙ্গে সর্বোচ্চ ৩ জন চালকের কাছে পাঠানো হয়েছে — একজন গ্রহণ করলেই অন্যদের রিকোয়েস্ট বন্ধ হবে।',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.deepOrange),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.notifications_active_rounded, color: Colors.deepOrange, size: 22),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'নতুন রাইড রিকোয়েস্ট এসেছে!',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              RideRequestCard(
+                key: ValueKey('modal_ride_${req['id']}'),
+                requestData: req,
+                onAccept: () {
+                  Navigator.pop(ctx);
+                  _activeModalRideId = null;
+                  _activeModalContext = null;
+                  _handleAcceptRide(req);
+                },
+                onReject: () {
+                  Navigator.pop(ctx);
+                  _activeModalRideId = null;
+                  _activeModalContext = null;
+                  _handleRejectRide(req['id']);
+                },
+                onTimeout: () {
+                  Navigator.pop(ctx);
+                  _activeModalRideId = null;
+                  _activeModalContext = null;
+                  _handleTimeoutRide(req['id']);
+                },
+                onTakenByOther: () {
+                  _closeIncomingRideModalIfTakenByOther(req['id']);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    ).then((_) {
+      if (_activeModalRideId == req['id']) {
+        _activeModalRideId = null;
+        _activeModalContext = null;
+      }
+    });
+  }
+
   Future<void> _handleAcceptRide(Map<String, dynamic> req) async {
     final rideId = req['id'];
     final result = await AuthService.acceptRide(rideId);
@@ -1027,12 +1773,26 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       });
     } else {
-      // Show error message (e.g. This ride is no longer available)
+      // Show error message (e.g. This ride is no longer available / already taken by another driver)
+      final bool alreadyTaken = result['already_taken'] == true || 
+                                (result['message'] != null && result['message'].toString().contains('অন্য একজন'));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(result['message'] ?? 'This ride is no longer available'),
-          backgroundColor: Colors.redAccent,
-          duration: const Duration(seconds: 3),
+          content: Row(
+            children: [
+              Icon(alreadyTaken ? Icons.person_off_rounded : Icons.error_outline, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  result['message'] ?? 'এই রাইডটি আর খালি নেই।',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: alreadyTaken ? Colors.deepOrange : Colors.redAccent,
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
         ),
       );
       // Remove from view and refresh
@@ -1056,6 +1816,23 @@ class _HomeScreenState extends State<HomeScreen> {
         duration: Duration(seconds: 2),
       ),
     );
+  }
+
+  Future<void> _handleTimeoutRide(int rideId) async {
+    setState(() {
+      _rejectedRideIds.add(rideId);
+      activeRequests.removeWhere((r) => r['id'] == rideId);
+    });
+    await AuthService.timeoutRide(rideId);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('নির্দিষ্ট সময়ে সাড়া না দেওয়ায় রিকোয়েস্টটি পরবর্তী নিকটবর্তী চালকের কাছে হস্তান্তর করা হয়েছে'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 3),
+      ),
+    );
+    _pollNearbyRequests();
   }
 
   Widget _buildDrawer() {
@@ -1145,12 +1922,16 @@ class RideRequestCard extends StatefulWidget {
   final Map<String, dynamic> requestData;
   final VoidCallback onAccept;
   final VoidCallback onReject;
+  final VoidCallback? onTimeout;
+  final VoidCallback? onTakenByOther;
 
   const RideRequestCard({
     super.key,
     required this.requestData,
     required this.onAccept,
     required this.onReject,
+    this.onTimeout,
+    this.onTakenByOther,
   });
 
   @override
@@ -1160,33 +1941,85 @@ class RideRequestCard extends StatefulWidget {
 class _RideRequestCardState extends State<RideRequestCard> {
   late int _timeLeft;
   Timer? _timer;
+  Timer? _statusCheckTimer;
 
   @override
   void initState() {
     super.initState();
-    _timeLeft = widget.requestData['expires_in'] ?? 60;
+    _initTimeLeft();
     _startTimer();
+    _startStatusCheck();
+  }
+
+  void _initTimeLeft() {
+    final exp = widget.requestData['expires_in'];
+    if (exp is int) {
+      _timeLeft = exp;
+    } else {
+      _timeLeft = int.tryParse('$exp') ?? 15;
+    }
+    if (_timeLeft < 0) _timeLeft = 0;
+  }
+
+  void _startStatusCheck() {
+    _statusCheckTimer?.cancel();
+    _statusCheckTimer = Timer.periodic(const Duration(seconds: 2), (t) async {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      final rideId = widget.requestData['id'];
+      if (rideId != null) {
+        final res = await AuthService.checkRideStatus(rideId);
+        if (mounted && (res['already_taken_by_other'] == true || res['is_available'] == false)) {
+          t.cancel();
+          widget.onTakenByOther?.call();
+        }
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant RideRequestCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.requestData['id'] != widget.requestData['id']) {
+      _timer?.cancel();
+      _statusCheckTimer?.cancel();
+      _initTimeLeft();
+      _startTimer();
+      _startStatusCheck();
+    }
   }
 
   void _startTimer() {
+    _timer?.cancel();
+    if (_timeLeft <= 0) {
+      widget.onTimeout?.call();
+      return;
+    }
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
       }
-      setState(() {
-        if (_timeLeft > 0) {
+      if (_timeLeft > 1) {
+        setState(() {
           _timeLeft--;
-        } else {
-          timer.cancel();
-        }
-      });
+        });
+      } else {
+        timer.cancel();
+        setState(() {
+          _timeLeft = 0;
+        });
+        widget.onTimeout?.call();
+      }
     });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _statusCheckTimer?.cancel();
     super.dispose();
   }
 
@@ -1194,6 +2027,7 @@ class _RideRequestCardState extends State<RideRequestCard> {
   Widget build(BuildContext context) {
     final req = widget.requestData;
     final isCritical = _timeLeft <= 10;
+    final bool hasRankingBadge = req['ranking_reason'] != null || req['is_top_match'] == true;
 
     return Card(
       elevation: 3,
@@ -1201,12 +2035,76 @@ class _RideRequestCardState extends State<RideRequestCard> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Column(
         children: [
+          // Dispatch Batch Notice: Top 3 Drivers, 15s Countdown, 1 Accepts -> Others Close
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+              border: Border(bottom: BorderSide(color: Colors.blue.shade100, width: 0.8)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.flash_on_rounded, size: 15, color: Colors.blue.shade800),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'সর্বোচ্চ ৩ জন অনলাইন ড্রাইভারকে পাঠানো হয়েছে (১৫ সেকেন্ডের কাউন্টডাউন)',
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Smart Dispatch Priority Badge
+          if (hasRankingBadge)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade100,
+                border: Border(
+                  bottom: BorderSide(color: Colors.amber.shade200, width: 0.8),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.stars_rounded, color: Colors.deepOrange, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      req['ranking_reason'] ?? 'দূরত্ব, রেটিং ও অভিজ্ঞতার ভিত্তিতে আপনাকে সর্বাগ্রে নির্বাচন করা হয়েছে',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.brown.shade800,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (req['dispatch_attempt'] != null && req['dispatch_attempt'] > 1)
+                    Container(
+                      margin: const EdgeInsets.only(left: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: Colors.deepOrange,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        'রাউন্ড ${req['dispatch_attempt']}',
+                        style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
           // Header (Passenger & Timer)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
               color: Colors.orange.shade50,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1243,12 +2141,25 @@ class _RideRequestCardState extends State<RideRequestCard> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: isCritical ? Colors.red : Colors.green.shade700,
+                    color: _timeLeft == 0
+                        ? Colors.grey.shade600
+                        : (isCritical ? Colors.red : Colors.green.shade700),
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Text(
-                    '$_timeLeft s',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _timeLeft == 0 ? Icons.timer_off_outlined : Icons.timer_outlined,
+                        size: 13,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _timeLeft == 0 ? 'মেয়াদ শেষ' : '$_timeLeft সে. বাকি',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -1279,7 +2190,11 @@ class _RideRequestCardState extends State<RideRequestCard> {
                               if (req['distance_to_pickup'] != null) ...[
                                 const SizedBox(width: 6),
                                 Text('(${req['distance_to_pickup']})', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
-                              ]
+                              ],
+                              if (req['estimated_pickup_time'] != null) ...[
+                                const SizedBox(width: 6),
+                                Text('• সময়: ${req['estimated_pickup_time']}', style: TextStyle(fontSize: 10, color: Colors.blue.shade800, fontWeight: FontWeight.w600)),
+                              ],
                             ],
                           ),
                           const SizedBox(height: 1),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:shadhinjatradriver/services/auth_service.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -46,7 +47,15 @@ class _MainNavigationState extends State<MainNavigation> {
         }
         
         FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-          if (message.notification != null) {
+          // Play sound and haptic vibration for incoming notification
+          SystemSound.play(SystemSoundType.alert);
+          HapticFeedback.heavyImpact();
+          Future.delayed(const Duration(milliseconds: 350), () {
+            SystemSound.play(SystemSoundType.alert);
+            HapticFeedback.heavyImpact();
+          });
+
+          if (mounted && message.notification != null) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('${message.notification!.title}: ${message.notification!.body}'),
