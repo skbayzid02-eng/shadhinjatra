@@ -285,15 +285,16 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
 
   void _triggerSos() {
     final rideId = widget.rideData['id'];
+    final dynamicNumber = widget.rideData['safety']?['emergency_number'] ?? widget.rideData['safety']?['sos_number'] ?? '৯৯৯';
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
-            SizedBox(width: 8),
-            Text('জরুরি সহায়তা (SOS ৯৯৯)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            const SizedBox(width: 8),
+            Text('জরুরি সহায়তা (SOS $dynamicNumber)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           ],
         ),
         content: const Text('আপনি কি জরুরি সহায়তা (SOS) সংকেত পাঠাতে এবং নিরাপত্তা দলের সাথে যোগাযোগ করতে চান?'),

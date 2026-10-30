@@ -28,7 +28,8 @@ class RideRequestController extends Controller
         }
 
         $fare = (float) $request->fare_amount;
-        $commission = round($fare * 0.10, 2);
+        $commissionRate = ((float) \App\Models\Setting::get('platform_commission_percent', 10.0)) / 100.0;
+        $commission = round($fare * $commissionRate, 2);
         $driverEarnings = round($fare - $commission, 2);
 
         $ride = Ride::create([

@@ -21,20 +21,38 @@ Route::post('/login', [\App\Http\Controllers\AuthController::class, 'login']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/home', [\App\Http\Controllers\HomeController::class, 'index']);
+    Route::get('/home/banners', [\App\Http\Controllers\HomeController::class, 'banners']);
+    Route::post('/home/banners', [\App\Http\Controllers\HomeController::class, 'storeBanner']);
+    Route::put('/home/banners/{id}', [\App\Http\Controllers\HomeController::class, 'updateBanner']);
+    Route::delete('/home/banners/{id}', [\App\Http\Controllers\HomeController::class, 'destroyBanner']);
     Route::get('/services', [\App\Http\Controllers\ServicesController::class, 'index']);
+    Route::post('/services', [\App\Http\Controllers\ServicesController::class, 'store']);
+    Route::put('/services/{id}', [\App\Http\Controllers\ServicesController::class, 'update']);
+    Route::delete('/services/{id}', [\App\Http\Controllers\ServicesController::class, 'destroy']);
     Route::get('/activity', [\App\Http\Controllers\ActivityController::class, 'index']);
     Route::get('/account', [\App\Http\Controllers\AccountController::class, 'index']);
     Route::put('/account/profile', [\App\Http\Controllers\AccountController::class, 'updateProfile']);
     Route::post('/account/avatar', [\App\Http\Controllers\AccountController::class, 'uploadAvatar']);
     Route::put('/account/settings', [\App\Http\Controllers\AccountController::class, 'updateSettings']);
+    Route::get('/account/emergency-contact', [\App\Http\Controllers\AccountController::class, 'emergencyContact']);
+    Route::post('/account/emergency-contact', [\App\Http\Controllers\AccountController::class, 'updateEmergencyContact']);
+    Route::put('/account/emergency-contact', [\App\Http\Controllers\AccountController::class, 'updateEmergencyContact']);
     Route::delete('/account', [\App\Http\Controllers\AccountController::class, 'deleteAccount']);
     Route::get('/account/notifications', [\App\Http\Controllers\AccountController::class, 'notifications']);
     Route::post('/account/notifications/mark-read', [\App\Http\Controllers\AccountController::class, 'markNotificationsRead']);
     Route::post('/account/notifications/{id}/read', [\App\Http\Controllers\AccountController::class, 'markSingleNotificationRead']);
     Route::get('/about', [\App\Http\Controllers\AccountController::class, 'about']);
     Route::get('/support', [\App\Http\Controllers\SupportController::class, 'index']);
+    Route::get('/support/contact', [\App\Http\Controllers\SupportController::class, 'contact']);
+    Route::post('/support/contact', [\App\Http\Controllers\SupportController::class, 'updateContact']);
+    Route::get('/support/categories', [\App\Http\Controllers\SupportController::class, 'categories']);
+    Route::post('/support/categories', [\App\Http\Controllers\SupportController::class, 'storeCategory']);
+    Route::get('/support/faqs', [\App\Http\Controllers\SupportController::class, 'faqs']);
+    Route::post('/support/faqs', [\App\Http\Controllers\SupportController::class, 'storeFaq']);
     Route::post('/support/ticket', [\App\Http\Controllers\SupportController::class, 'submitTicket']);
     Route::get('/security', [\App\Http\Controllers\PrivacySecurityController::class, 'index']);
+    Route::get('/security/bot-protection', [\App\Http\Controllers\PrivacySecurityController::class, 'botProtection']);
+    Route::post('/security/bot-protection', [\App\Http\Controllers\PrivacySecurityController::class, 'updateBotProtection']);
     Route::post('/security/password', [\App\Http\Controllers\PrivacySecurityController::class, 'updatePassword']);
     Route::put('/security/settings', [\App\Http\Controllers\PrivacySecurityController::class, 'updateSettings']);
     Route::get('/account/places', [\App\Http\Controllers\SavedPlaceController::class, 'index']);
@@ -52,14 +70,23 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/rides/{id}/payment/confirm', [\App\Http\Controllers\Api\RideController::class, 'confirmPayment']);
     Route::post('/rides/{id}/resend-otp', [\App\Http\Controllers\Api\RideController::class, 'resendOtp']);
     Route::post('/rides/{id}/sos', [\App\Http\Controllers\Api\RideController::class, 'sosAlert']);
+    Route::get('/safety/sos', [\App\Http\Controllers\Api\RideController::class, 'sosInfo']);
+    Route::post('/safety/sos', [\App\Http\Controllers\Api\RideController::class, 'updateSosInfo']);
     Route::post('/rides/{id}/simulate', [\App\Http\Controllers\Api\RideController::class, 'simulateDriver']);
     Route::post('/rides/{id}/rate', [\App\Http\Controllers\Api\RideController::class, 'rateRide']);
     Route::get('/map/nearby-drivers', [\App\Http\Controllers\Api\RideController::class, 'nearbyDrivers']);
     Route::get('/promotions', [\App\Http\Controllers\Api\PromotionController::class, 'index']);
+    Route::post('/promotions/apply', [\App\Http\Controllers\Api\PromotionController::class, 'apply']);
     Route::post('/promotions/send', [\App\Http\Controllers\Api\PromotionController::class, 'send']);
+    Route::post('/promotions', [\App\Http\Controllers\Api\PromotionController::class, 'store']);
+    Route::put('/promotions/{id}', [\App\Http\Controllers\Api\PromotionController::class, 'update']);
+    Route::delete('/promotions/{id}', [\App\Http\Controllers\Api\PromotionController::class, 'destroy']);
+    Route::get('/commission', [\App\Http\Controllers\Api\PromotionController::class, 'commission']);
+    Route::post('/commission', [\App\Http\Controllers\Api\PromotionController::class, 'updateCommission']);
     
     // Universal Chat Endpoints for a specific ride
     Route::get('/rides/{id}/chat', [\App\Http\Controllers\Api\RideChatController::class, 'index']);
+    Route::get('/rides/{id}/chat/new-messages', [\App\Http\Controllers\Api\RideChatController::class, 'fetchNewMessages']);
     Route::post('/rides/{id}/chat', [\App\Http\Controllers\Api\RideChatController::class, 'store']);
     
     // Driver API Routes
@@ -92,17 +119,27 @@ Route::middleware('auth:sanctum')->group(function () {
     
     // Driver Account Sub-Endpoints
     Route::get('/driver/account/vehicle', [\App\Http\Controllers\DriverAccountController::class, 'vehicle']);
+    Route::post('/driver/account/vehicle', [\App\Http\Controllers\DriverAccountController::class, 'updateVehicle']);
+    Route::put('/driver/account/vehicle', [\App\Http\Controllers\DriverAccountController::class, 'updateVehicle']);
     Route::get('/driver/account/documents', [\App\Http\Controllers\DriverAccountController::class, 'documents']);
     Route::get('/driver/account/subscription', [\App\Http\Controllers\DriverAccountController::class, 'subscription']);
     
-    // Driver Chat Endpoints
+    // Driver Chat Endpoints (Dynamic Switch for Reverb / Shared Hosting Delta-Polling)
     Route::get('/driver/chats', [\App\Http\Controllers\DriverChatController::class, 'index']);
+    Route::get('/driver/chats/realtime-config', [\App\Http\Controllers\DriverChatController::class, 'realtimeConfig']);
+    Route::post('/driver/chats/realtime-mode', [\App\Http\Controllers\DriverChatController::class, 'updateRealtimeMode']);
     Route::get('/driver/chats/{id}', [\App\Http\Controllers\DriverChatController::class, 'show']);
+    Route::get('/driver/chats/{id}/new-messages', [\App\Http\Controllers\DriverChatController::class, 'fetchNewMessages']);
     Route::post('/driver/chats/{id}/send', [\App\Http\Controllers\DriverChatController::class, 'sendMessage']);
     
     Route::get('/map/geocode', [\App\Http\Controllers\MapController::class, 'geocode']);
     Route::get('/map/route', [\App\Http\Controllers\MapController::class, 'route']);
 });
 
-// Public Vehicle API
+// Dynamic Vehicle Categories & Fare Rates API (Database Synced)
 Route::get('/vehicles', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'index']);
+Route::get('/vehicles/{id}', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'show']);
+Route::post('/vehicles', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'store']);
+Route::put('/vehicles/{id}', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'update']);
+Route::post('/vehicles/{id}', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'update']);
+Route::delete('/vehicles/{id}', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'destroy']);

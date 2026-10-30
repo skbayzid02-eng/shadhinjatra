@@ -2,16 +2,77 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use App\Models\Ride;
+use App\Events\MessageSent;
 use App\Models\Message;
 use App\Models\Notification;
+use App\Models\Ride;
+use App\Models\Setting;
 use App\Services\FcmService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class DriverChatController extends Controller
 {
-    // Fetch list of chats and notifications for the authenticated driver
-    public function index(Request $request)
+    /**
+     * Get the active realtime mode ('reverb' or 'polling').
+     *
+     * @return string
+     */
+    protected function getActiveMode(): string
+    {
+        $settingMode = Setting::get('chat_realtime_mode');
+
+        if (!empty($settingMode)) {
+            return $settingMode;
+        }
+
+        return config('broadcasting.default') === 'reverb' ? 'reverb' : 'polling';
+    }
+
+    /**
+     * Get the polling interval in milliseconds.
+     *
+     * @return int
+     */
+    protected function getPollingInterval(): int
+    {
+        $interval = (int) Setting::get('chat_polling_interval_ms', 2500);
+
+        return $interval >= 1000 ? $interval : 2500;
+    }
+
+    /**
+     * Get realtime chat config settings.
+     *
+     * @return array{mode: string, is_reverb_enabled: bool, polling_interval_ms: int, channel_prefix: string, event_name: string, reverb: array{key: string, host: string, port: int, scheme: string}}
+     */
+    protected function getRealtimeConfigData(): array
+    {
+        $mode = $this->getActiveMode();
+
+        return [
+            'mode' => $mode,
+            'is_reverb_enabled' => ($mode === 'reverb'),
+            'polling_interval_ms' => $this->getPollingInterval(),
+            'channel_prefix' => 'chat.ride.',
+            'event_name' => 'message.sent',
+            'reverb' => [
+                'key' => (string) Setting::get('chat_reverb_app_key', env('REVERB_APP_KEY', '')),
+                'host' => (string) Setting::get('chat_reverb_host', env('REVERB_HOST', 'localhost')),
+                'port' => (int) Setting::get('chat_reverb_port', env('REVERB_PORT', 8080)),
+                'scheme' => (string) Setting::get('chat_reverb_scheme', env('REVERB_SCHEME', 'http')),
+            ],
+        ];
+    }
+
+    /**
+     * Fetch list of chats and notifications for the authenticated driver.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function index(Request $request): JsonResponse
     {
         $user = $request->user();
 
@@ -96,13 +157,61 @@ class DriverChatController extends Controller
             'data' => [
                 'chats' => $chats,
                 'notifications' => $notifications,
+                'realtime_config' => $this->getRealtimeConfigData(),
             ],
             'message' => 'Chats and notifications fetched successfully'
         ]);
     }
 
-    // Fetch messages for a specific ride / chat ID
-    public function show(Request $request, $id)
+    /**
+     * Get realtime chat switch configuration for the driver app.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function realtimeConfig(Request $request): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $this->getRealtimeConfigData(),
+            'message' => 'Chat realtime configuration fetched successfully'
+        ]);
+    }
+
+    /**
+     * Dynamically update realtime mode (admin / setting switch).
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function updateRealtimeMode(Request $request): JsonResponse
+    {
+        $request->validate([
+            'mode' => 'required|in:reverb,polling',
+            'polling_interval_ms' => 'nullable|integer|min:1000|max:60000',
+        ]);
+
+        Setting::set('chat_realtime_mode', $request->mode, 'chat');
+
+        if ($request->filled('polling_interval_ms')) {
+            Setting::set('chat_polling_interval_ms', (string) $request->polling_interval_ms, 'chat');
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->getRealtimeConfigData(),
+            'message' => 'Chat realtime mode updated successfully'
+        ]);
+    }
+
+    /**
+     * Fetch messages for a specific ride / chat ID.
+     *
+     * @param Request $request
+     * @param int|string $id
+     * @return JsonResponse
+     */
+    public function show(Request $request, int|string $id): JsonResponse
     {
         $user = $request->user();
 
@@ -123,24 +232,28 @@ class DriverChatController extends Controller
             ->where('is_read', false)
             ->update(['is_read' => true]);
 
-        $messages = Message::where('ride_id', $id)
+        $rawMessages = Message::where('ride_id', $id)
             ->orderBy('created_at', 'asc')
-            ->get()
-            ->map(function ($msg) use ($user) {
-                $isMe = ($msg->sender_id === $user->id);
-                return [
-                    'id' => $msg->id,
-                    'sender' => $isMe ? 'driver' : 'passenger',
-                    'sender_id' => $msg->sender_id,
-                    'receiver_id' => $msg->receiver_id,
-                    'text' => $msg->message,
-                    'message' => $msg->message,
-                    'is_me' => $isMe,
-                    'is_read' => (bool) $msg->is_read,
-                    'time' => $msg->created_at ? $msg->created_at->format('h:i A') : '',
-                    'formatted_time' => $msg->created_at ? $msg->created_at->format('d M, h:i A') : '',
-                ];
-            });
+            ->get();
+
+        $lastMessageId = $rawMessages->isNotEmpty() ? $rawMessages->last()->id : 0;
+
+        $messages = $rawMessages->map(function ($msg) use ($user) {
+            $isMe = ($msg->sender_id === $user->id);
+            return [
+                'id' => $msg->id,
+                'ride_id' => $msg->ride_id,
+                'sender' => $isMe ? 'driver' : 'passenger',
+                'sender_id' => $msg->sender_id,
+                'receiver_id' => $msg->receiver_id,
+                'text' => $msg->message,
+                'message' => $msg->message,
+                'is_me' => $isMe,
+                'is_read' => (bool) $msg->is_read,
+                'time' => $msg->created_at ? $msg->created_at->format('h:i A') : '',
+                'formatted_time' => $msg->created_at ? $msg->created_at->format('d M, h:i A') : '',
+            ];
+        });
 
         return response()->json([
             'success' => true,
@@ -154,13 +267,88 @@ class DriverChatController extends Controller
                 'pickup' => $ride->pickup_location,
                 'dropoff' => $ride->dropoff_location,
                 'messages' => $messages,
+                'last_message_id' => $lastMessageId,
+                'realtime_config' => $this->getRealtimeConfigData(),
             ],
             'message' => 'Chat messages fetched successfully'
         ]);
     }
 
-    // Send a message from driver to passenger
-    public function sendMessage(Request $request, $id)
+    /**
+     * Delta-fetch endpoint for Shared Hosting / Local Server Without SSH Access.
+     * Efficiently fetches only new messages created after $last_message_id.
+     *
+     * @param Request $request
+     * @param int|string $id
+     * @return JsonResponse
+     */
+    public function fetchNewMessages(Request $request, int|string $id): JsonResponse
+    {
+        $user = $request->user();
+
+        $ride = Ride::find($id);
+        if (!$ride || ($ride->driver_id !== $user->id && $ride->user_id !== $user->id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'অননুমোদিত অ্যাক্সেস বা রাইড পাওয়া যায়নি'
+            ], 403);
+        }
+
+        $lastMessageId = (int) $request->query('last_message_id', 0);
+
+        // Fetch messages with ID greater than lastMessageId
+        $newMessages = Message::where('ride_id', $id)
+            ->where('id', '>', $lastMessageId)
+            ->orderBy('created_at', 'asc')
+            ->get();
+
+        // Mark incoming messages as read
+        if ($newMessages->isNotEmpty()) {
+            Message::where('ride_id', $id)
+                ->where('receiver_id', $user->id)
+                ->where('id', '>', $lastMessageId)
+                ->where('is_read', false)
+                ->update(['is_read' => true]);
+        }
+
+        $formatted = $newMessages->map(function ($msg) use ($user) {
+            $isMe = ($msg->sender_id === $user->id);
+            return [
+                'id' => $msg->id,
+                'ride_id' => $msg->ride_id,
+                'sender' => $isMe ? 'driver' : 'passenger',
+                'sender_id' => $msg->sender_id,
+                'receiver_id' => $msg->receiver_id,
+                'text' => $msg->message,
+                'message' => $msg->message,
+                'is_me' => $isMe,
+                'is_read' => (bool) $msg->is_read,
+                'time' => $msg->created_at ? $msg->created_at->format('h:i A') : '',
+                'formatted_time' => $msg->created_at ? $msg->created_at->format('d M, h:i A') : '',
+            ];
+        });
+
+        $newLastId = $newMessages->isNotEmpty() ? $newMessages->last()->id : $lastMessageId;
+
+        return response()->json([
+            'success' => true,
+            'mode' => $this->getActiveMode(),
+            'polling_interval_ms' => $this->getPollingInterval(),
+            'has_new' => $newMessages->isNotEmpty(),
+            'last_message_id' => $newLastId,
+            'data' => $formatted,
+            'message' => 'New messages fetched successfully'
+        ]);
+    }
+
+    /**
+     * Send a message from driver to passenger with Reverb / Polling dual dispatch.
+     *
+     * @param Request $request
+     * @param int|string $id
+     * @return JsonResponse
+     */
+    public function sendMessage(Request $request, int|string $id): JsonResponse
     {
         $request->validate([
             'message' => 'required|string|max:1000',
@@ -197,10 +385,23 @@ class DriverChatController extends Controller
             );
         }
 
+        $mode = $this->getActiveMode();
+
+        // Safe Reverb broadcast dispatch:
+        // Wrapped in try/catch to ensure shared hosts without SSH/WebSocket daemon never return 500
+        try {
+            if ($mode === 'reverb' || config('broadcasting.default') !== 'null') {
+                broadcast(new MessageSent($msg, $ride, 'driver'))->toOthers();
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Chat Reverb broadcast bypassed (daemon offline or shared host fallback): ' . $e->getMessage());
+        }
+
         return response()->json([
             'success' => true,
             'data' => [
                 'id' => $msg->id,
+                'ride_id' => $ride->id,
                 'sender' => 'driver',
                 'sender_id' => $user->id,
                 'receiver_id' => $receiverId,
@@ -209,6 +410,8 @@ class DriverChatController extends Controller
                 'is_me' => true,
                 'is_read' => false,
                 'time' => $msg->created_at->format('h:i A'),
+                'formatted_time' => $msg->created_at->format('d M, h:i A'),
+                'realtime_mode' => $mode,
             ],
             'message' => 'মেসেজ সফলভাবে পাঠানো হয়েছে'
         ]);

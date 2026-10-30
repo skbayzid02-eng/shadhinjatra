@@ -5,6 +5,10 @@
 
     RewriteEngine On
 
+    # Block script and HTML execution in public/storage upload directory
+    RewriteCond %{REQUEST_URI} ^/storage/.*\.(php[0-9]?|phtml|phar|phps|pht|html?|js|cgi|pl|py|sh|bash|exe|bat|cmd|asp[x]?|jsp|vbs)$ [NC]
+    RewriteRule .* - [F,L]
+
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]

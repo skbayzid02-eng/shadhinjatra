@@ -33,6 +33,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   bool _isLoadingChat = true;
   bool _isSending = false;
   Timer? _pollingTimer;
+  int _lastMessageId = 0;
+  int _pollingIntervalMs = 2500;
+  String _realtimeMode = 'polling';
 
   bool get _isRideChat => widget.rideId != null;
 
@@ -50,14 +53,33 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     if (_isRideChat) {
-      _fetchRideMessages();
-      _pollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
-        if (mounted) _fetchRideMessages(silent: true);
-      });
+      _initRideChat();
     } else {
       _tabController = TabController(length: 2, vsync: this);
       _fetchInboxData();
     }
+  }
+
+  Future<void> _initRideChat() async {
+    // 1. Fetch dynamic realtime config (polling interval, mode)
+    try {
+      final config = await AuthService.fetchChatRealtimeConfig();
+      if (config['success'] == true && config['data'] != null) {
+        _realtimeMode = config['data']['mode'] ?? 'polling';
+        final int interval = config['data']['polling_interval_ms'] ?? 2500;
+        if (interval >= 1000) {
+          _pollingIntervalMs = interval;
+        }
+      }
+    } catch (_) {}
+
+    // 2. Fetch initial chat history
+    await _fetchRideMessages();
+
+    // 3. Dynamic Switch System: Delta polling for Shared Hosts & Local Servers without SSH access
+    _pollingTimer = Timer.periodic(Duration(milliseconds: _pollingIntervalMs), (timer) {
+      if (mounted) _fetchRideMessages(silent: true);
+    });
   }
 
   @override
@@ -83,29 +105,50 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         });
       }
     } catch (e) {
-      debugPrint('Error fetching inbox data: $e');
+      debugPrint('Error fetching inbox data: ');
       if (mounted) setState(() => _isLoadingInbox = false);
     }
   }
 
-  // --- Ride Chat Logic ---
+  // --- Ride Chat Logic (Dynamic Delta-Fetch & Full Fetch) ---
   Future<void> _fetchRideMessages({bool silent = false}) async {
     if (widget.rideId == null) return;
     try {
-      final result = await AuthService.fetchChatMessages(widget.rideId!);
-      if (result['success'] == true && mounted) {
-        final List<dynamic> fetched = result['data']?['messages'] ?? result['data'] ?? [];
-        final int oldLength = _messages.length;
-        setState(() {
-          _messages = fetched;
-          _isLoadingChat = false;
-        });
-        if (!silent || fetched.length > oldLength) {
+      if (silent && _lastMessageId > 0) {
+        // Delta-fetch: only fetch new messages created after _lastMessageId
+        final result = await AuthService.fetchNewChatMessages(widget.rideId!, _lastMessageId);
+        if (result['success'] == true && mounted) {
+          final List<dynamic> newItems = result['data'] ?? [];
+          if (newItems.isNotEmpty) {
+            setState(() {
+              _messages.addAll(newItems);
+              _lastMessageId = result['last_message_id'] ?? _lastMessageId;
+            });
+            _scrollToBottom();
+          }
+        }
+      } else {
+        // Full fetch on initial load or screen resume
+        final result = await AuthService.fetchChatMessages(widget.rideId!);
+        if (result['success'] == true && mounted) {
+          final List<dynamic> fetched = result['data']?['messages'] ?? result['data'] ?? [];
+          int lastId = result['data']?['last_message_id'] ?? 0;
+          if (lastId == 0 && fetched.isNotEmpty) {
+            final lastItem = fetched.last;
+            if (lastItem is Map && lastItem['id'] is int) {
+              lastId = lastItem['id'];
+            }
+          }
+          setState(() {
+            _messages = fetched;
+            _lastMessageId = lastId;
+            _isLoadingChat = false;
+          });
           _scrollToBottom();
         }
       }
     } catch (e) {
-      debugPrint('Error fetching ride messages: $e');
+      debugPrint('Error fetching ride messages: ');
     } finally {
       if (mounted && _isLoadingChat) {
         setState(() => _isLoadingChat = false);

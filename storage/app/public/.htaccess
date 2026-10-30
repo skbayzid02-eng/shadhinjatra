@@ -1,0 +1,61 @@
+# ----------------------------------------------------------------------
+# Shadhin Jatra - Public Upload Directory Security Policy
+# Blocks execution of PHP, HTML, HTM, JS, CGI, Shell, and executable scripts.
+# ----------------------------------------------------------------------
+
+# 1. Disable script execution engines and directory listing
+Options -ExecCGI -Indexes
+
+# 2. Prevent PHP execution for Apache mod_php modules
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+# 3. Remove script handlers so files cannot be interpreted by server runtimes
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .php8 .phps .pht .phar .html .htm .js .cgi .pl .py .sh
+RemoveType .php .phtml .php3 .php4 .php5 .php7 .php8 .phps .pht .phar .html .htm .js .cgi .pl .py .sh
+
+# 4. Deny access to executable scripts, HTML/HTM, JavaScript, and shell files
+<FilesMatch "(?i)\.(php[0-9]?|phtml|phar|phps|pht|html?|js|cgi|pl|py|sh|bash|exe|bat|cmd|asp[x]?|jsp|vbs)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Deny,Allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# 5. Deny access to hidden dotfiles (including .htaccess, .gitignore)
+<FilesMatch "^\.">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Deny,Allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# 6. Secondary protection via mod_rewrite (Drop with 403 Forbidden)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteCond %{REQUEST_URI} \.(php[0-9]?|phtml|phar|phps|pht|html?|js|cgi|pl|py|sh|bash|exe|bat|cmd|asp[x]?|jsp|vbs)$ [NC]
+    RewriteRule .* - [F,L]
+</IfModule>
+
+# 7. Security Headers: Prevent MIME-sniffing and block inline scripts
+<IfModule mod_headers.c>
+    # Prevent browser from MIME-sniffing a response away from declared content-type
+    Header set X-Content-Type-Options "nosniff"
+    # Ensure any SVG or file in storage cannot execute JavaScript
+    Header set Content-Security-Policy "default-src 'self' data: blob:; script-src 'none'; object-src 'none';"
+</IfModule>
+

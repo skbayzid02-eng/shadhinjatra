@@ -22,12 +22,15 @@ class AuthService {
     return 'http://192.168.0.7:8000/api';
   }
 
+  static const String userAgent = 'ShadhinJatraDriver/1.0';
+
   static Future<Map<String, String>> getHeaders() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      'User-Agent': userAgent,
       if (token != null) 'Authorization': 'Bearer $token',
     };
   }
@@ -779,4 +782,89 @@ class AuthService {
       return {'success': false, 'message': 'Network error: $e'};
     }
   }
-}
+
+
+  static Future<Map<String, dynamic>> fetchChatRealtimeConfig() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/chats/realtime-config'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchNewChatMessages(int rideId, int lastMessageId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/chats/$rideId/new-messages?last_message_id=$lastMessageId'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+
+  static Future<Map<String, dynamic>> updateVehicle(Map<String, dynamic> data) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/account/vehicle'),
+        headers: headers,
+        body: jsonEncode(data),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+
+  static Future<Map<String, dynamic>> fetchEmergencyContact() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/account/emergency-contact'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateEmergencyContact({
+    required String phone,
+    String? name,
+    String? relation,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/account/emergency-contact'),
+        headers: headers,
+        body: jsonEncode({
+          'emergency_contact_phone': phone,
+          if (name != null) 'emergency_contact_name': name,
+          if (relation != null) 'emergency_contact_relation': relation,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchSosInfo() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/safety/sos'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+}

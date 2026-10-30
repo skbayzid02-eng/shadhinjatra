@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shadhinjatra/services/auth_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SupportScreen extends StatefulWidget {
   const SupportScreen({super.key});
@@ -16,6 +17,17 @@ class _SupportScreenState extends State<SupportScreen> {
   void initState() {
     super.initState();
     _fetchSupportData();
+  }
+
+  Future<void> _launchUrl(String urlString) async {
+    final Uri url = Uri.parse(urlString);
+    if (!await launchUrl(url)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not launch $urlString')),
+        );
+      }
+    }
   }
 
   Future<void> _fetchSupportData() async {
@@ -214,16 +226,26 @@ class _SupportScreenState extends State<SupportScreen> {
                 ListTile(
                   leading: const Icon(Icons.phone, color: Colors.green),
                   title: const Text('Call Us'),
-                  subtitle: Text(contact['phone']),
+                  subtitle: Text(contact != null && contact['phone'] != null ? contact['phone'].toString() : 'Not available'),
                   trailing: const Icon(Icons.call_made, size: 16),
-                  onTap: () {},
+                  onTap: () {
+                    final phone = contact?['phone']?.toString();
+                    if (phone != null && phone.isNotEmpty) {
+                      _launchUrl('tel:$phone');
+                    }
+                  },
                 ),
                 ListTile(
                   leading: const Icon(Icons.email, color: Colors.orange),
                   title: const Text('Email Support'),
-                  subtitle: Text(contact['email']),
+                  subtitle: Text(contact != null && contact['email'] != null ? contact['email'].toString() : 'Not available'),
                   trailing: const Icon(Icons.call_made, size: 16),
-                  onTap: () {},
+                  onTap: () {
+                    final email = contact?['email']?.toString();
+                    if (email != null && email.isNotEmpty) {
+                      _launchUrl('mailto:$email');
+                    }
+                  },
                 ),
               ],
             ),

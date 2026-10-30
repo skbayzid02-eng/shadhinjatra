@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Notification;
 use App\Models\Ride;
+use App\Models\Setting;
 use App\Models\User;
 use App\Models\WalletTransaction;
 use App\Models\SosAlert;
@@ -31,7 +32,8 @@ class RideController extends Controller
         ]);
 
         $fare = (float) $validated['fare_amount'];
-        $commission = round($fare * 0.10, 2);
+        $commissionRate = ((float) \App\Models\Setting::get('platform_commission_percent', 10.0)) / 100.0;
+        $commission = round($fare * $commissionRate, 2);
         $driverEarnings = round($fare - $commission, 2);
 
         $ride = Ride::create([
@@ -148,7 +150,8 @@ class RideController extends Controller
         // Automatically cascade any expired dispatch windows (15s) in background
         app(\App\Services\RideDispatchService::class)->cascadeExpiredDispatches();
 
-        $userId = $request->user()->id;
+        $user = $request->user();
+        $userId = $user->id;
 
         $ride = null;
         if ($id) {
@@ -313,8 +316,16 @@ class RideController extends Controller
                 ],
 
                 'safety' => [
-                    'sos_number' => '999',
-                    'driver_verified' => true,
+                    'emergency_number' => (string) Setting::get('emergency_number', Setting::get('sos_number', '999')),
+                    'sos_number' => (string) Setting::get('sos_number', Setting::get('emergency_number', '999')),
+                    'sos_title' => (string) Setting::get('sos_title', 'জাতীয় জরুরি সেবা (৯৯৯)'),
+                    'sos_police_number' => (string) Setting::get('sos_police_number', '999'),
+                    'sos_ambulance_number' => (string) Setting::get('sos_ambulance_number', '199'),
+                    'sos_support_number' => (string) Setting::get('sos_support_phone', Setting::get('support_phone', '+8801900000000')),
+                    'user_emergency_contact' => $user?->emergency_contact_phone,
+                    'user_emergency_contact_name' => $user?->emergency_contact_name,
+                    'user_emergency_contact_relation' => $user?->emergency_contact_relation,
+                    'driver_verified' => (bool) ($driver?->is_verified ?? true),
                     'otp' => ($userId === $ride->user_id) ? $ride->otp : null,
                 ],
             ]
@@ -715,7 +726,8 @@ class RideController extends Controller
 
             $paymentMethod = strtolower($request->input('payment_method', $ride->payment_method ?? 'cash'));
             $fare = (float) $ride->fare_amount;
-            $commission = $ride->commission_amount > 0 ? (float) $ride->commission_amount : round($fare * 0.10, 2);
+            $commissionRate = ((float) \App\Models\Setting::get('platform_commission_percent', 10.0)) / 100.0;
+            $commission = $ride->commission_amount > 0 ? (float) $ride->commission_amount : round($fare * $commissionRate, 2);
             $driverEarnings = $ride->driver_earnings > 0 ? (float) $ride->driver_earnings : round($fare - $commission, 2);
 
             $driver = $ride->driver_id ? User::where('id', $ride->driver_id)->lockForUpdate()->first() : null;
@@ -883,13 +895,20 @@ class RideController extends Controller
         $lng = $request->input('longitude', $user->longitude ?? $ride->pickup_lon);
         $details = $request->input('details', 'Emergency SOS button triggered during ride.');
 
+        $defaultEmergencyNumber = (string) Setting::get('emergency_number', Setting::get('sos_number', '999'));
+        $sosTitle = (string) Setting::get('sos_title', 'জাতীয় জরুরি সেবা');
+
+        // Prefer caller-provided emergency number or user's database emergency contact or platform setting
+        $requestedNumber = $request->input('emergency_number') ?? $request->input('sos_number');
+        $emergencyNumber = $requestedNumber ?: ($user->emergency_contact_phone ?: $defaultEmergencyNumber);
+
         $sos = SosAlert::create([
             'ride_id' => $ride->id,
             'user_id' => $user->id,
             'user_type' => $userType,
             'latitude' => $lat,
             'longitude' => $lng,
-            'emergency_number' => '999',
+            'emergency_number' => $emergencyNumber,
             'status' => 'active',
             'details' => $details,
         ]);
@@ -898,12 +917,13 @@ class RideController extends Controller
             'user_id' => $user->id,
             'ride_id' => $ride->id,
             'title' => 'জরুরি সহায়তা (SOS) সংকেত প্রেরিত হয়েছে',
-            'message' => 'আপনার জরুরি সংকেত আমাদের নিরাপত্তা দল এবং জাতীয় জরুরি সেবা ৯৯৯-এ রেজিস্টার হয়েছে। সহায়তার জন্য অপেক্ষা করুন।',
+            'message' => "আপনার জরুরি সংকেত আমাদের নিরাপত্তা দল এবং {$sosTitle} ({$emergencyNumber})-এ রেজিস্টার হয়েছে। সহায়তার জন্য অপেক্ষা করুন।",
             'type' => 'emergency_sos',
             'data' => [
                 'sos_id' => $sos->id,
                 'ride_id' => $ride->id,
-                'sos_number' => '999',
+                'emergency_number' => $emergencyNumber,
+                'sos_number' => $emergencyNumber,
                 'status' => 'active',
             ],
             'is_read' => false,
@@ -911,16 +931,85 @@ class RideController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'জরুরি সহায়তা সংকেত সফলভাবে সক্রিয় হয়েছে। পুলিশ ও অ্যাম্বুলেন্সের জন্য অবিলম্বে ৯৯৯-এ কল করুন।',
+            'message' => "জরুরি সহায়তা সংকেত সফলভাবে সক্রিয় হয়েছে। পুলিশ ও অ্যাম্বুলেন্সের জন্য অবিলম্বে {$emergencyNumber}-এ কল করুন।",
             'data' => [
                 'sos_id' => $sos->id,
                 'ride_id' => $ride->id,
-                'sos_number' => '999',
+                'emergency_number' => $emergencyNumber,
+                'sos_number' => $emergencyNumber,
+                'sos_title' => $sosTitle,
+                'user_emergency_contact' => $user->emergency_contact_phone,
                 'status' => 'active',
                 'user_type' => $userType,
                 'created_at' => $sos->created_at,
             ],
         ]);
+    }
+
+    /**
+     * Get emergency SOS and safety hotline details dynamically from database.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function sosInfo(Request $request)
+    {
+        $user = $request->user();
+        $emergencyNumber = (string) Setting::get('emergency_number', Setting::get('sos_number', '999'));
+        $sosNumber = (string) Setting::get('sos_number', Setting::get('emergency_number', '999'));
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'emergency_number' => $emergencyNumber,
+                'sos_number' => $sosNumber,
+                'sos_title' => (string) Setting::get('sos_title', 'জাতীয় জরুরি সেবা (৯৯৯)'),
+                'sos_police_number' => (string) Setting::get('sos_police_number', '999'),
+                'sos_ambulance_number' => (string) Setting::get('sos_ambulance_number', '199'),
+                'sos_fire_service_number' => (string) Setting::get('sos_fire_service_number', '16163'),
+                'sos_women_helpline' => (string) Setting::get('sos_women_helpline', '109'),
+                'sos_support_phone' => (string) Setting::get('sos_support_phone', Setting::get('support_phone', '+8801900000000')),
+                'user_emergency_contact' => $user?->emergency_contact_phone,
+                'user_emergency_contact_name' => $user?->emergency_contact_name,
+                'user_emergency_contact_relation' => $user?->emergency_contact_relation,
+            ],
+            'message' => 'Emergency SOS details fetched successfully',
+        ]);
+    }
+
+    /**
+     * Update emergency SOS details in database (Admin).
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function updateSosInfo(Request $request)
+    {
+        $validated = $request->validate([
+            'emergency_number' => 'nullable|string|max:30',
+            'sos_number' => 'nullable|string|max:30',
+            'sos_title' => 'nullable|string|max:100',
+            'sos_police_number' => 'nullable|string|max:30',
+            'sos_ambulance_number' => 'nullable|string|max:30',
+            'sos_fire_service_number' => 'nullable|string|max:30',
+            'sos_women_helpline' => 'nullable|string|max:30',
+            'sos_support_phone' => 'nullable|string|max:30',
+        ]);
+
+        foreach ($validated as $key => $val) {
+            if (!is_null($val)) {
+                Setting::set($key, (string) $val, 'safety');
+            }
+        }
+
+        // Keep emergency_number and sos_number in sync if one was explicitly supplied
+        if (isset($validated['emergency_number']) && !isset($validated['sos_number'])) {
+            Setting::set('sos_number', (string) $validated['emergency_number'], 'safety');
+        } elseif (isset($validated['sos_number']) && !isset($validated['emergency_number'])) {
+            Setting::set('emergency_number', (string) $validated['sos_number'], 'safety');
+        }
+
+        return $this->sosInfo($request);
     }
 
     public function simulateDriver(Request $request, $id)

@@ -12,6 +12,8 @@
     
     <!-- Meta Descriptions for SEO -->
     <meta name="description" content="Shadhin Jatra is your reliable partner for independent and seamless journeys. Download our Rider and User apps today.">
+    <!-- Robots Meta Tag for Search Engines (Configurable) -->
+    @robotsMeta
 
     <style>
         :root {

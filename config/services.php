@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'shadhinjatra' => [
+        'user_agent' => env('APP_USER_AGENT', 'ShadhinjatraApp/1.0'),
+        'driver_user_agent' => env('DRIVER_USER_AGENT', 'ShadhinJatraDriver/1.0'),
+        'osm_user_agent' => env('OSM_USER_AGENT', 'ShadhinjatraApp/1.0'),
+    ],
+
 ];

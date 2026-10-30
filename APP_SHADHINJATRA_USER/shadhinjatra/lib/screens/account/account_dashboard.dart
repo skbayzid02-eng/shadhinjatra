@@ -11,6 +11,7 @@ import 'package:shadhinjatra/screens/account/support/support_screen.dart';
 import 'package:shadhinjatra/screens/account/notifications/notifications_screen.dart';
 import 'package:shadhinjatra/screens/account/about/about_screen.dart';
 import 'package:shadhinjatra/screens/account/privacy/privacy_security_screen.dart';
+import 'package:shadhinjatra/screens/account/promotions_screen.dart';
 import 'package:shadhinjatra/screens/activity_screen.dart';
 import 'package:shadhinjatra/screens/login_screen.dart';
 
@@ -87,7 +88,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
               // 3. Payment Methods
               _buildMenuItem(Icons.payment, 'Payment Methods', () => _navigatePlaceholder('Payment Methods')),
               // 13. Promotions / Offers
-              _buildMenuItem(Icons.local_offer, 'Promotions / Offers', () => _navigatePlaceholder('Promotions / Offers')),
+              _buildMenuItem(Icons.local_offer, 'Promotions / Offers', () => _navigateTo(const PromotionsScreen())),
             ]),
             const SizedBox(height: 16),
             
@@ -105,7 +106,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
               // 9. Safety
               _buildMenuItem(Icons.shield, 'Safety Center', () => _navigateTo(const SafetyScreen())),
               // 10. Emergency Assistance / SOS
-              _buildMenuItem(Icons.sos, 'Emergency Assistance / SOS', () => _navigatePlaceholder('Emergency Assistance'), color: Colors.red),
+              _buildMenuItem(Icons.sos, 'Emergency Assistance / SOS', () => _navigateTo(const SafetyScreen()), color: Colors.red),
               // 12. Help & Support
               _buildMenuItem(Icons.help_outline, 'Help & Support', () => _navigateTo(const SupportScreen())),
             ]),

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Setting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
@@ -23,6 +24,11 @@ class AccountController extends Controller
                 'avatar' => $user->avatar ? asset('storage/' . $user->avatar) : null,
                 'wallet_balance' => 550.00,
                 'uber_cash' => 200.00,
+                'verification_status' => $user->verification_status ?? 'verified',
+                'is_suspended' => ($user->verification_status === 'suspended' || $user->subscription_status === 'suspended'),
+                'suspension_reason' => ($user->verification_status === 'suspended')
+                    ? 'নিরাপত্তা বা পলিসি পর্যালোচনার জন্য আপনার অ্যাকাউন্ট সাময়িকভাবে স্থগিত করা হয়েছে।'
+                    : null,
                 'saved_places' => [
                     ['id' => 1, 'name' => 'Home', 'address' => 'Dhanmondi, Dhaka', 'icon' => 'home'],
                     ['id' => 2, 'name' => 'Work', 'address' => 'Banani, Dhaka', 'icon' => 'work'],
@@ -57,7 +63,7 @@ class AccountController extends Controller
     public function uploadAvatar(Request $request)
     {
         $request->validate([
-            'avatar' => 'required|image|mimes:jpeg,png,jpg|max:2048',
+            'avatar' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120',
         ]);
 
         $user = $request->user();
@@ -239,14 +245,78 @@ class AccountController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
-                'app_name' => 'স্বাধীন যাত্রা (Shadhin Jatra)',
-                'version' => 'v1.0.0',
-                'company_info' => 'Shadhin Jatra is Bangladesh’s premier ride-sharing service, committed to providing safe, reliable, and affordable transportation for everyone.',
-                'terms_url' => url('/terms-and-conditions'),
-                'privacy_url' => url('/privacy-policy'),
-                'support_email' => 'support@shadhinjatra.com',
-                'website' => 'https://shadhinjatra.com'
+                'app_name' => Setting::get('app_name', 'স্বাধীন যাত্রা (Shadhin Jatra)'),
+                'version' => Setting::get('app_version', 'v1.0.0'),
+                'company_info' => Setting::get('company_info', 'Shadhin Jatra is Bangladesh’s premier ride-sharing service, committed to providing safe, reliable, and affordable transportation for everyone.'),
+                'terms_url' => Setting::get('terms_url', url('/terms-and-conditions')),
+                'privacy_url' => Setting::get('privacy_url', url('/privacy-policy')),
+                'support_email' => Setting::get('support_email', Setting::get('contact_email', 'support@shadhinjatra.com')),
+                'website' => Setting::get('website', 'https://shadhinjatra.com'),
             ]
+        ]);
+    }
+
+    /**
+     * Get emergency contacts and dynamic safety hotline numbers.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function emergencyContact(Request $request)
+    {
+        $user = $request->user();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'user_emergency_contact' => [
+                    'name' => $user->emergency_contact_name,
+                    'phone' => $user->emergency_contact_phone,
+                    'relation' => $user->emergency_contact_relation,
+                ],
+                'national_services' => [
+                    'emergency_number' => (string) Setting::get('emergency_number', Setting::get('sos_number', '999')),
+                    'sos_number' => (string) Setting::get('sos_number', Setting::get('emergency_number', '999')),
+                    'title' => (string) Setting::get('sos_title', 'জাতীয় জরুরি সেবা (৯৯৯)'),
+                    'police' => (string) Setting::get('sos_police_number', '999'),
+                    'ambulance' => (string) Setting::get('sos_ambulance_number', '199'),
+                    'fire_service' => (string) Setting::get('sos_fire_service_number', '16163'),
+                    'women_helpline' => (string) Setting::get('sos_women_helpline', '109'),
+                    'support_phone' => (string) Setting::get('sos_support_phone', Setting::get('support_phone', '+8801900000000')),
+                ],
+            ],
+            'message' => 'Emergency contact details fetched successfully',
+        ]);
+    }
+
+    /**
+     * Update user's personal emergency contact.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function updateEmergencyContact(Request $request)
+    {
+        $validated = $request->validate([
+            'emergency_contact_name' => 'nullable|string|max:100',
+            'emergency_contact_phone' => 'required|string|max:30',
+            'emergency_contact_relation' => 'nullable|string|max:50',
+        ]);
+
+        $user = $request->user();
+        $user->emergency_contact_name = $validated['emergency_contact_name'] ?? $user->emergency_contact_name;
+        $user->emergency_contact_phone = $validated['emergency_contact_phone'];
+        $user->emergency_contact_relation = $validated['emergency_contact_relation'] ?? $user->emergency_contact_relation;
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'জরুরি যোগাযোগের তথ্য সফলভাবে সংরক্ষণ করা হয়েছে',
+            'data' => [
+                'name' => $user->emergency_contact_name,
+                'phone' => $user->emergency_contact_phone,
+                'relation' => $user->emergency_contact_relation,
+            ],
         ]);
     }
 }

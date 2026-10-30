@@ -45,6 +45,8 @@ dependencies:
   firebase_messaging: ^16.7.0
   easy_localization: ^3.0.8
   url_launcher: ^6.3.2
+  get: ^4.7.3
+  cloud_firestore: ^6.10.2
 
 dev_dependencies:
   flutter_test:

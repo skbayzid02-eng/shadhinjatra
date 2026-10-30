@@ -182,7 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final response = await http.get(
         Uri.parse('https://nominatim.openstreetmap.org/search?format=json&q=$query&countrycodes=bd&limit=10'),
-        headers: {'User-Agent': 'ShadhinJatraApp/1.0'},
+        headers: {'User-Agent': AuthService.userAgent},
       );
       final data = jsonDecode(response.body) as List;
       return data.map((e) => e as Map<String, dynamic>).toList();
@@ -2100,18 +2100,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _callEmergency() async {
+    final sosNumber = _activeRideTracking?['safety']?['emergency_number'] ??
+        _activeRideTracking?['safety']?['sos_number'] ??
+        '999';
+    final sosTitle = _activeRideTracking?['safety']?['sos_title'] ?? 'জাতীয় জরুরি সেবা ($sosNumber)';
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
-            SizedBox(width: 8),
-            Text('জরুরি সহায়তা ৯৯৯', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            const SizedBox(width: 8),
+            Text('জরুরি সহায়তা $sosNumber', style: const TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
-        content: const Text('আপনি কি সরাসরি জাতীয় জরুরি সেবা ৯৯৯ এ কল করতে চান?'),
+        content: Text('আপনি কি সরাসরি $sosTitle এ কল করতে চান?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -2131,11 +2136,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     _currentRideId!,
                     lat: _currentLocation.latitude,
                     lng: _currentLocation.longitude,
-                    details: 'Passenger triggered SOS emergency signal via 999 button',
+                    details: 'Passenger triggered SOS emergency signal via emergency button',
+                    emergencyNumber: sosNumber,
                   );
                 } catch (_) {}
               }
-              final uri = Uri.parse('tel:999');
+              final uri = Uri.parse('tel:$sosNumber');
               if (await canLaunchUrl(uri)) {
                 await launchUrl(uri);
               }

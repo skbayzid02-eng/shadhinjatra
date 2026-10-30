@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:get/get.dart';
+import 'package:shadhinjatra/controllers/language_controller.dart';
+import 'package:shadhinjatra/controllers/theme_controller.dart';
 import 'package:shadhinjatra/services/auth_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -10,7 +13,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _isDarkMode = false;
   bool _trafficView = false;
   bool _twoStepVerification = false;
   bool _isLoading = false;
@@ -86,8 +88,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       trailing: isSelected ? const Icon(Icons.check, color: Colors.deepPurple) : null,
                       onTap: () async {
-                        await context.setLocale(Locale(code));
-                        await AuthService.updateLanguage(code);
+                        await Get.find<LanguageController>().changeLanguage(code, context);
                         if (context.mounted) Navigator.pop(context);
                       },
                     );
@@ -168,16 +169,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _showLanguageBottomSheet(context),
           ),
-          SwitchListTile(
-            secondary: const Icon(Icons.dark_mode),
-            title: const Text('App Theme'),
-            subtitle: const Text('Dark Mode'),
-            value: _isDarkMode,
-            onChanged: (value) {
-              setState(() => _isDarkMode = value);
-              _updateSetting('theme', value ? 'dark' : 'light');
-            },
-          ),
+          Obx(() {
+            final themeCtrl = Get.find<ThemeController>();
+            return SwitchListTile(
+              secondary: const Icon(Icons.dark_mode),
+              title: const Text('App Theme'),
+              subtitle: Text(themeCtrl.isDarkMode.value ? 'Dark Mode (ডার্ক থিম)' : 'Light Mode (লাইট থিম)'),
+              value: themeCtrl.isDarkMode.value,
+              onChanged: (value) {
+                themeCtrl.setDarkMode(value);
+              },
+            );
+          }),
           
           _buildSectionHeader('Map Display'),
           SwitchListTile(
