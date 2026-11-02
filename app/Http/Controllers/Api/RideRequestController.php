@@ -48,7 +48,9 @@ class RideRequestController extends Controller
             'distance_km' => $request->distance_km ?? 0,
             'status' => 'pending',
             'otp' => (string) rand(100000, 999999),
-            'otp_expires_at' => now()->addMinutes(30),
+            'otp_expires_at' => now()->addMinutes(5),
+            'otp_attempts' => 0,
+            'otp_resend_count' => 0,
         ]);
 
         // Create in-app notification for passenger
@@ -68,8 +70,8 @@ class RideRequestController extends Controller
             'is_read' => false,
         ]);
 
-        // Intelligently rank nearby verified, online drivers with active subscription,
-        // and dispatch simultaneously to the top 3 closest drivers within radius with 15s window
+        // Intelligently rank nearby eligible drivers within 5 KM radius,
+        // and sequentially dispatch strictly to the nearest eligible driver first
         $dispatchService = app(\App\Services\RideDispatchService::class);
         $assignedBatch = $dispatchService->dispatchToNextBatch($ride);
 
@@ -81,8 +83,10 @@ class RideRequestController extends Controller
             'message' => 'Ride requested successfully',
             'data' => array_merge($ride->toArray(), [
                 'dispatched_driver_ids' => $ride->dispatched_driver_ids,
+                'dispatched_driver_id' => $ride->dispatched_driver_id,
                 'dispatch_expires_at' => $ride->dispatch_expires_at,
-                'search_radius_km' => $ride->search_radius_km,
+                'search_radius_km' => $ride->search_radius_km ?? 5.0,
+                'is_sequential' => true,
                 'batch_count' => $assignedBatch->count(),
             ])
         ], 201);

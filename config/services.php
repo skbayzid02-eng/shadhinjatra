@@ -38,7 +38,7 @@ return [
     'shadhinjatra' => [
         'user_agent' => env('APP_USER_AGENT', 'ShadhinjatraApp/1.0'),
         'driver_user_agent' => env('DRIVER_USER_AGENT', 'ShadhinJatraDriver/1.0'),
-        'osm_user_agent' => env('OSM_USER_AGENT', 'ShadhinjatraApp/1.0'),
+        'osm_user_agent' => env('OSM_USER_AGENT', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 (ShadhinJatraApp/1.0)'),
     ],
 
 ];

@@ -7,25 +7,33 @@ import 'package:shadhinjatra/screens/activity_screen.dart';
 import 'package:shadhinjatra/screens/account_screen.dart';
 
 class MainNavigation extends StatefulWidget {
-  const MainNavigation({super.key});
+  final int initialIndex;
+  final String? initialVehicleType;
+
+  const MainNavigation({
+    super.key,
+    this.initialIndex = 0,
+    this.initialVehicleType,
+  });
 
   @override
   State<MainNavigation> createState() => _MainNavigationState();
 }
 
 class _MainNavigationState extends State<MainNavigation> {
-  int _currentIndex = 0;
-
-  final List<Widget> _pages = [
-    const HomeScreen(),
-    const ServicesScreen(),
-    const ActivityScreen(),
-    const AccountScreen(),
-  ];
+  late int _currentIndex;
+  late final List<Widget> _pages;
 
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.initialIndex;
+    _pages = [
+      HomeScreen(initialVehicleType: widget.initialVehicleType),
+      const ServicesScreen(),
+      const ActivityScreen(),
+      const AccountScreen(),
+    ];
     _setupFirebaseMessaging();
   }
 

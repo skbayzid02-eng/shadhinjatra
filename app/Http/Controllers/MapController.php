@@ -16,8 +16,15 @@ class MapController extends Controller
      */
     protected function getUserAgent(): string
     {
-        return (string) (Setting::get('osm_user_agent')
-            ?: config('services.shadhinjatra.osm_user_agent', 'ShadhinjatraApp/1.0'));
+        $settingAgent = Setting::get('osm_user_agent');
+        if (!empty($settingAgent)) {
+            return (string) $settingAgent;
+        }
+
+        return (string) config(
+            'services.shadhinjatra.osm_user_agent',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 (ShadhinJatraApp/1.0)'
+        );
     }
 
     /**
@@ -32,9 +39,12 @@ class MapController extends Controller
             'query' => 'required|string',
         ]);
 
-        // Call Nominatim OSM with central User-Agent
+        // Call Nominatim OSM with central browser User-Agent
         $response = Http::withHeaders([
             'User-Agent' => $this->getUserAgent(),
+            'Accept' => 'application/json',
+            'Accept-Language' => 'bn-BD,bn;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer' => 'https://shadhinjatra.com/',
         ])->get('https://nominatim.openstreetmap.org/search', [
             'q' => $request->query('query'),
             'format' => 'json',
@@ -69,27 +79,58 @@ class MapController extends Controller
 
         $coords = $request->start . ';' . $request->end;
 
-        // Call OSRM Project with central User-Agent
-        $response = Http::withHeaders([
-            'User-Agent' => $this->getUserAgent(),
-        ])->get("http://router.project-osrm.org/route/v1/driving/{$coords}", [
-            'geometries' => 'geojson',
-            'overview' => 'full',
-        ]);
+        try {
+            // Call OSRM Project with central User-Agent and 6s timeout
+            $response = Http::withHeaders([
+                'User-Agent' => $this->getUserAgent(),
+            ])->timeout(6)->get("http://router.project-osrm.org/route/v1/driving/{$coords}", [
+                'geometries' => 'geojson',
+                'overview' => 'full',
+            ]);
 
-        if ($response->successful()) {
-            $data = $response->json();
-            if (isset($data['code']) && $data['code'] === 'Ok') {
-                $route = $data['routes'][0];
-                return response()->json([
-                    'success' => true,
-                    'distance' => $route['distance'], // in meters
-                    'duration' => $route['duration'], // in seconds
-                    'polyline' => $route['geometry']['coordinates'],
-                ]);
+            if ($response->successful()) {
+                $data = $response->json();
+                if (isset($data['code']) && $data['code'] === 'Ok') {
+                    $route = $data['routes'][0];
+                    return response()->json([
+                        'success' => true,
+                        'distance' => (float) $route['distance'], // in meters
+                        'duration' => (float) $route['duration'], // in seconds
+                        'polyline' => $route['geometry']['coordinates'],
+                        'geometry' => $route['geometry']['coordinates'],
+                    ]);
+                }
             }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("OSRM routing service warning: {$e->getMessage()} - using Haversine calculation fallback");
         }
 
-        return response()->json(['success' => false, 'message' => 'Unable to calculate route'], 500);
+        // Robust Fallback: Calculate Haversine distance if OSRM is unavailable or times out
+        $startParts = explode(',', $request->start);
+        $endParts = explode(',', $request->end);
+
+        $startLon = (float) ($startParts[0] ?? 90.4125);
+        $startLat = (float) ($startParts[1] ?? 23.8103);
+        $endLon = (float) ($endParts[0] ?? 90.4125);
+        $endLat = (float) ($endParts[1] ?? 23.8103);
+
+        $haversineKm = (new \App\Services\RideDispatchService())->calculateDistance($startLat, $startLon, $endLat, $endLon);
+        // Add ~25% detour factor for Bangladesh road network routing vs straight line
+        $roadDistanceKm = round($haversineKm * 1.25, 2);
+        $meters = $roadDistanceKm * 1000.0;
+        $seconds = ($roadDistanceKm / 28.0) * 3600.0; // 28 km/h city average
+        $straightLine = [
+            [$startLon, $startLat],
+            [$endLon, $endLat],
+        ];
+
+        return response()->json([
+            'success' => true,
+            'distance' => $meters,
+            'duration' => $seconds,
+            'polyline' => $straightLine,
+            'geometry' => $straightLine,
+            'fallback' => true,
+        ]);
     }
 }

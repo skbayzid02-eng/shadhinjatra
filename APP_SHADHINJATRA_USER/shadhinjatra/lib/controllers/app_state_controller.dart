@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:shadhinjatra/routes/app_router.dart' show AuthNotifier;
 import 'package:shadhinjatra/services/auth_service.dart';
 
 class AppStateController extends GetxController {
@@ -48,6 +49,7 @@ class AppStateController extends GetxController {
 
   void setSuspended(bool suspended, {String? title, String? reason, String? phone}) {
     isSuspended.value = suspended;
+    AuthNotifier.instance.setSuspended(suspended);
     if (title != null) suspensionTitle.value = title;
     if (reason != null) suspensionReason.value = reason;
     if (phone != null) supportPhone.value = phone;
@@ -55,5 +57,6 @@ class AppStateController extends GetxController {
 
   void clearSuspension() {
     isSuspended.value = false;
+    AuthNotifier.instance.setSuspended(false);
   }
 }

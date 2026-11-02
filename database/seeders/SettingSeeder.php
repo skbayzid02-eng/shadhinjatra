@@ -195,6 +195,42 @@ class SettingSeeder extends Seeder
                 'value' => 'noindex, nofollow, noarchive, nosnippet',
                 'group' => 'seo',
             ],
+            // Mandatory Driver Subscription Settings
+            [
+                'key' => 'monthly_subscription_price',
+                'value' => '500.00',
+                'group' => 'subscription',
+            ],
+            [
+                'key' => 'subscription_duration_days',
+                'value' => '30',
+                'group' => 'subscription',
+            ],
+            [
+                'key' => 'subscription_mandatory',
+                'value' => 'true',
+                'group' => 'subscription',
+            ],
+            [
+                'key' => 'bkash_merchant_number',
+                'value' => '01700000000',
+                'group' => 'payment_gateway',
+            ],
+            [
+                'key' => 'nagad_merchant_number',
+                'value' => '01800000000',
+                'group' => 'payment_gateway',
+            ],
+            [
+                'key' => 'rocket_merchant_number',
+                'value' => '01900000000',
+                'group' => 'payment_gateway',
+            ],
+            [
+                'key' => 'sslcommerz_store_id',
+                'value' => 'shadhinjatra_live',
+                'group' => 'payment_gateway',
+            ],
         ];
 
         foreach ($settings as $setting) {

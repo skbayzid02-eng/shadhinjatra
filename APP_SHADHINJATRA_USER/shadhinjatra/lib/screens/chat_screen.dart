@@ -1,10 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show Platform;
+import 'package:shadhinjatra/services/auth_service.dart';
 
 class ChatScreen extends StatefulWidget {
   final int rideId;
@@ -22,12 +18,6 @@ class _ChatScreenState extends State<ChatScreen> {
   List<dynamic> _messages = [];
   bool _isLoading = true;
   Timer? _timer;
-
-  static String get baseUrl {
-    if (kIsWeb) return 'http://127.0.0.1:8000/api';
-    try { if (Platform.isAndroid) return 'http://192.168.0.7:8000/api'; } catch (e) {}
-    return 'http://192.168.0.7:8000/api';
-  }
 
   @override
   void initState() {
@@ -47,37 +37,26 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _fetchMessages({bool silent = false}) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return;
-
     try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/rides/${widget.rideId}/chat'),
-        headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'},
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == true) {
-          if (mounted) {
-            setState(() {
-              _messages = data['data'];
-              _isLoading = false;
-            });
-            if (!silent) _scrollToBottom();
-          }
-        }
+      final res = await AuthService.fetchChatMessages(widget.rideId);
+      if (res['success'] == true && mounted) {
+        setState(() {
+          _messages = res['data'] ?? [];
+          _isLoading = false;
+        });
+        if (!silent) _scrollToBottom();
+      } else if (mounted) {
+        setState(() => _isLoading = false);
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _sendMessage() async {
-    if (_messageController.text.trim().isEmpty) return;
-
     final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+
     _messageController.clear();
 
     // Optimistic UI update
@@ -91,18 +70,10 @@ class _ChatScreenState extends State<ChatScreen> {
     });
     _scrollToBottom();
 
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return;
-
     try {
-      await http.post(
-        Uri.parse('$baseUrl/rides/${widget.rideId}/chat'),
-        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json', 'Accept': 'application/json'},
-        body: jsonEncode({'message': text}),
-      );
+      await AuthService.sendChatMessage(widget.rideId, text);
       _fetchMessages(silent: true);
-    } catch (e) {
+    } catch (_) {
       // Failed to send
     }
   }

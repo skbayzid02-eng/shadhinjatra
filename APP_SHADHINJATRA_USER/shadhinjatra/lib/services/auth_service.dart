@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:image_picker/image_picker.dart';
 import 'package:shadhinjatra/services/firestore_domain_service.dart';
+import 'package:shadhinjatra/routes/app_router.dart' show AuthNotifier;
 
 class AuthService {
   /// Base API URL dynamically fetched from Firebase Firestore at startup.
@@ -15,98 +17,164 @@ class AuthService {
 
   static const String userAgent = 'ShadhinJatraApp/1.0';
 
+  /// Modern browser User-Agents for OpenStreetMap / Nominatim API requests.
+  static const Map<String, String> osmBrowserUserAgents = {
+    'chrome':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 (ShadhinJatraApp/1.0)',
+    'chrome_android':
+        'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.86 Mobile Safari/537.36 (ShadhinJatraApp/1.0)',
+    'safari':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15 (ShadhinJatraApp/1.0)',
+    'safari_ios':
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1 (ShadhinJatraApp/1.0)',
+    'firefox':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0 (ShadhinJatraApp/1.0)',
+  };
+
+  /// Returns an appropriate browser User-Agent (Chrome, Safari, etc.) for OpenStreetMap.
+  static String getOsmUserAgent({String? preference}) {
+    if (preference != null) {
+      final key = preference.toLowerCase().trim();
+      if (key == 'safari' || key.contains('ios')) {
+        return osmBrowserUserAgents['safari_ios']!;
+      } else if (key.contains('safari_macos') || key.contains('mac')) {
+        return osmBrowserUserAgents['safari']!;
+      } else if (key == 'chrome' || key.contains('desktop') || key.contains('windows')) {
+        return osmBrowserUserAgents['chrome']!;
+      } else if (key.contains('android')) {
+        return osmBrowserUserAgents['chrome_android']!;
+      } else if (key.contains('firefox')) {
+        return osmBrowserUserAgents['firefox']!;
+      }
+    }
+
+    if (kIsWeb) {
+      return osmBrowserUserAgents['chrome']!;
+    }
+
+    try {
+      if (Platform.isIOS) {
+        return osmBrowserUserAgents['safari_ios']!;
+      } else if (Platform.isMacOS) {
+        return osmBrowserUserAgents['safari']!;
+      } else if (Platform.isAndroid) {
+        return osmBrowserUserAgents['chrome_android']!;
+      } else if (Platform.isWindows) {
+        return osmBrowserUserAgents['chrome']!;
+      }
+    } catch (_) {}
+
+    return osmBrowserUserAgents['chrome_android']!;
+  }
+
+  /// Request headers for OpenStreetMap Nominatim with browser User-Agent & Accept headers.
+  static Map<String, String> getOsmHeaders({String? browser}) {
+    return {
+      'User-Agent': getOsmUserAgent(preference: browser),
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'bn-BD,bn;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Referer': 'https://shadhinjatra.com/',
+    };
+  }
+
   static Future<Map<String, String>> getHeaders() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      'User-Agent': userAgent,
+      if (!kIsWeb) 'User-Agent': userAgent,
       if (token != null) 'Authorization': 'Bearer $token',
     };
   }
 
   static Future<Map<String, dynamic>> login(String email, String password) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-        }),
-      );
+    final candidates = FirestoreDomainService.candidateUrls;
+    dynamic lastError;
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == true && data['token'] != null) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('auth_token', data['token']);
-        }
-        return data;
-      } else {
-        return jsonDecode(response.body);
-      }
-    } catch (e) {
-      final fallback = FirestoreDomainService.fallbackUrl;
-      if (fallback != null && fallback.isNotEmpty) {
-        try {
-          final res2 = await http.post(
-            Uri.parse('$fallback/login'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'email': email,
-              'password': password,
-            }),
-          );
-          if (res2.statusCode == 200) {
-            final data = jsonDecode(res2.body);
-            if (data['success'] == true && data['token'] != null) {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setString('auth_token', data['token']);
-            }
-            return data;
-          } else {
-            return jsonDecode(res2.body);
+    for (final candidate in candidates) {
+      try {
+        final response = await http.post(
+          Uri.parse('$candidate/login'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: jsonEncode({
+            'email': email,
+            'password': password,
+          }),
+        ).timeout(const Duration(seconds: 5));
+
+        FirestoreDomainService.updateWorkingBaseUrl(candidate);
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['success'] == true && data['token'] != null) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('auth_token', data['token']);
+            AuthNotifier.instance.setLoggedIn(true);
           }
-        } catch (_) {}
+          return data;
+        } else {
+          return jsonDecode(response.body);
+        }
+      } catch (e) {
+        lastError = e;
+        debugPrint('AuthService: Login attempt to $candidate failed: $e');
+        continue;
       }
-      return {'success': false, 'message': 'Network error: $e'};
     }
+
+    return {'success': false, 'message': 'Network error: $lastError'};
   }
 
   static Future<Map<String, dynamic>> register(String name, String email, String phone, String password) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/register'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': name,
-          'email': email,
-          'phone': phone,
-          'password': password,
-        }),
-      );
+    final candidates = FirestoreDomainService.candidateUrls;
+    dynamic lastError;
 
-      if (response.statusCode == 201) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == true && data['token'] != null) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('auth_token', data['token']);
+    for (final candidate in candidates) {
+      try {
+        final response = await http.post(
+          Uri.parse('$candidate/register'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: jsonEncode({
+            'name': name,
+            'email': email,
+            'phone': phone,
+            'password': password,
+          }),
+        ).timeout(const Duration(seconds: 5));
+
+        FirestoreDomainService.updateWorkingBaseUrl(candidate);
+
+        if (response.statusCode == 201) {
+          final data = jsonDecode(response.body);
+          if (data['success'] == true && data['token'] != null) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('auth_token', data['token']);
+            AuthNotifier.instance.setLoggedIn(true);
+          }
+          return data;
+        } else {
+          return jsonDecode(response.body);
         }
-        return data;
-      } else {
-        // Laravel validation errors often come back as 422
-        return jsonDecode(response.body);
+      } catch (e) {
+        lastError = e;
+        continue;
       }
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
     }
+
+    return {'success': false, 'message': 'Network error: $lastError'};
   }
 
   static Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
+    AuthNotifier.instance.setLoggedIn(false);
   }
 
   static Future<bool> isLoggedIn() async {
@@ -122,24 +190,34 @@ class AuthService {
        return {'success': false, 'message': 'No authentication token found'};
     }
 
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/$endpoint'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
-      );
+    final candidates = FirestoreDomainService.candidateUrls;
+    dynamic lastError;
 
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      } else {
-        return {'success': false, 'message': 'Error: ${response.statusCode}'};
+    for (final candidate in candidates) {
+      try {
+        final response = await http.get(
+          Uri.parse('$candidate/$endpoint'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+            'Accept': 'application/json',
+          },
+        ).timeout(const Duration(seconds: 6));
+
+        FirestoreDomainService.updateWorkingBaseUrl(candidate);
+
+        if (response.statusCode == 200) {
+          return jsonDecode(response.body);
+        } else {
+          return {'success': false, 'message': 'Error: ${response.statusCode}'};
+        }
+      } catch (e) {
+        lastError = e;
+        continue;
       }
-    } catch (e) {
-      return {'success': false, 'message': 'Network error: $e'};
     }
+
+    return {'success': false, 'message': 'Network error: $lastError'};
   }
 
   static Future<Map<String, dynamic>> fetchHomeData() async {
@@ -186,8 +264,84 @@ class AuthService {
       );
       return jsonDecode(response.body);
     } catch (e) {
-      return {'success': false, 'message': 'Network error'};
+      return {'success': false, 'message': 'Network error: $e'};
     }
+  }
+
+  static Future<Map<String, dynamic>> markNotificationUnread(dynamic id) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/account/notifications/$id/unread'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> deleteNotification(dynamic id) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/account/notifications/$id'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> bulkDeleteNotifications(List<dynamic> ids) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/account/notifications/bulk-delete'),
+        headers: headers,
+        body: jsonEncode({'ids': ids}),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> deleteAllNotifications() async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/account/notifications/delete-all'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> restoreNotifications(List<dynamic> ids) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/account/notifications/restore'),
+        headers: headers,
+        body: jsonEncode({'ids': ids}),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchUnreadNotificationsCount() async {
+    return _fetchData('account/notifications/unread-count');
   }
 
   static Future<Map<String, dynamic>> fetchAboutData() async {
@@ -373,8 +527,9 @@ class AuthService {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     try {
+      final encodedQuery = Uri.encodeComponent(query.trim());
       final response = await http.get(
-        Uri.parse('$baseUrl/map/geocode?query=$query'),
+        Uri.parse('$baseUrl/map/geocode?query=$encodedQuery'),
         headers: {
           if (token != null) 'Authorization': 'Bearer $token',
           'Accept': 'application/json',
@@ -390,8 +545,10 @@ class AuthService {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     try {
+      final start = Uri.encodeComponent(startLonLat.trim());
+      final end = Uri.encodeComponent(endLonLat.trim());
       final response = await http.get(
-        Uri.parse('$baseUrl/map/route?start=$startLonLat&end=$endLonLat'),
+        Uri.parse('$baseUrl/map/route?start=$start&end=$end'),
         headers: {
           if (token != null) 'Authorization': 'Bearer $token',
           'Accept': 'application/json',
@@ -400,6 +557,34 @@ class AuthService {
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  /// Calculates real-time dynamic fares and available driver counts from backend for all vehicle categories.
+  static Future<Map<String, dynamic>> calculateFares({
+    required double distanceKm,
+    int? durationMins,
+    double? pickupLat,
+    double? pickupLon,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/fare/calculate'),
+        headers: headers,
+        body: jsonEncode({
+          'distance_km': distanceKm,
+          if (durationMins != null) 'duration_mins': durationMins,
+          if (pickupLat != null) 'pickup_lat': pickupLat,
+          if (pickupLon != null) 'pickup_lon': pickupLon,
+        }),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return {'success': false, 'message': 'HTTP ${response.statusCode}'};
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
     }
   }
 
@@ -490,12 +675,29 @@ class AuthService {
     }
   }
 
-  static Future<Map<String, dynamic>> fetchNearbyDrivers(double lat, double lng, [String? vehicleType]) async {
+  static Future<Map<String, dynamic>> fetchRideDispatchStatus([int? rideId]) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) {
+      return {'success': false, 'message': 'Unauthenticated'};
+    }
+
+    try {
+      final url = rideId != null 
+          ? '$baseUrl/rides/$rideId/dispatch-status' 
+          : '$baseUrl/rides/current/dispatch-status';
+      final response = await http.get(Uri.parse(url), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchNearbyDrivers(double lat, double lng, [String? vehicleType, double radius = 5.0]) async {
     final headers = await getHeaders();
     try {
-      var url = '$baseUrl/map/nearby-drivers?latitude=$lat&longitude=$lng';
+      var url = '$baseUrl/map/nearby-drivers?latitude=$lat&longitude=$lng&radius=$radius';
       if (vehicleType != null && vehicleType.isNotEmpty) {
-        url += '&vehicle_type=$vehicleType';
+        url += '&vehicle_type=${Uri.encodeComponent(vehicleType)}';
       }
       final response = await http.get(Uri.parse(url), headers: headers);
       return jsonDecode(response.body);
@@ -680,5 +882,159 @@ class AuthService {
       debugPrint('Error fetching vehicles from database: $e');
     }
     return [];
+  }
+
+  /// Fetch chat messages for a ride.
+  static Future<Map<String, dynamic>> fetchChatMessages(int rideId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/rides/$rideId/chat'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return {'success': false, 'message': 'HTTP ${response.statusCode}'};
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Send a chat message for a ride.
+  static Future<Map<String, dynamic>> sendChatMessage(int rideId, String message) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rides/$rideId/chat'),
+        headers: headers,
+        body: jsonEncode({'message': message}),
+      );
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body);
+      }
+      return {'success': false, 'message': 'HTTP ${response.statusCode}'};
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Fetch earnings, fare breakdown, ride history, and period summaries (Daily, Weekly, Monthly, Total).
+  static Future<Map<String, dynamic>> fetchEarnings({String period = 'daily', int? days}) async {
+    final query = days != null ? 'earnings?period=$period&days=$days' : 'earnings?period=$period';
+    return _fetchData(query);
+  }
+
+  /// Request payout/withdrawal from available earnings.
+  static Future<Map<String, dynamic>> requestEarningsWithdrawal({
+    required double amount,
+    required String paymentMethod,
+    required String accountNumber,
+  }) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/withdraw'),
+        headers: headers,
+        body: jsonEncode({
+          'amount': amount,
+          'payment_method': paymentMethod,
+          'account_number': accountNumber,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Fetch driver subscription status, admin-configured pricing, duration, and expiry alert.
+  static Future<Map<String, dynamic>> fetchSubscriptionStatus() async {
+    return _fetchData('subscription/status');
+  }
+
+  /// Subscribe or renew monthly driver subscription via bKash, Nagad, Rocket, SSLCommerz, or Wallet.
+  static Future<Map<String, dynamic>> subscribeOrRenew({
+    required String paymentMethod,
+    String? transactionId,
+    String? phoneNumber,
+  }) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/subscription/subscribe'),
+        headers: headers,
+        body: jsonEncode({
+          'payment_method': paymentMethod,
+          'transaction_id': transactionId,
+          'phone_number': phoneNumber,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Fetch driver subscription payment history.
+  static Future<Map<String, dynamic>> fetchSubscriptionHistory() async {
+    return _fetchData('subscription/history');
+  }
+
+  /// Fetch nearby ride requests dispatched to this driver.
+  static Future<Map<String, dynamic>> fetchNearbyRideRequests() async {
+    return _fetchData('driver/nearby-requests');
+  }
+
+  /// Fetch single ride request preview details.
+  static Future<Map<String, dynamic>> fetchRideRequestPreview(int rideId) async {
+    return _fetchData('driver/ride/$rideId/request-preview');
+  }
+
+  /// Accept incoming ride request.
+  static Future<Map<String, dynamic>> acceptRideRequest(int rideId) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/ride/$rideId/accept'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Decline / Reject incoming ride request.
+  static Future<Map<String, dynamic>> declineRideRequest(int rideId) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/ride/$rideId/decline'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Record dispatch timeout and cascade to next driver batch.
+  static Future<Map<String, dynamic>> timeoutRideRequest(int rideId) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/ride/$rideId/timeout'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
   }
 }

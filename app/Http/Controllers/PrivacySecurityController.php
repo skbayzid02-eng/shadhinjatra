@@ -135,9 +135,9 @@ class PrivacySecurityController extends Controller
     {
         $validated = $request->validate([
             'bot_protection_enabled' => 'nullable|boolean',
-            'app_user_agent' => 'nullable|string|max:100',
-            'driver_user_agent' => 'nullable|string|max:100',
-            'osm_user_agent' => 'nullable|string|max:100',
+            'app_user_agent' => 'nullable|string|max:255',
+            'driver_user_agent' => 'nullable|string|max:255',
+            'osm_user_agent' => 'nullable|string|max:500',
             'allowed_user_agents' => 'nullable|string|max:255',
             'blocked_bots' => 'nullable|string|max:255',
         ]);

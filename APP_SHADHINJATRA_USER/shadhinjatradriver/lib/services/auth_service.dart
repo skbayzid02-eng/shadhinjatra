@@ -22,6 +22,33 @@ class AuthService {
     return 'http://192.168.0.7:8000/api';
   }
 
+  static List<String> get candidateUrls {
+    final list = <String>[];
+    if (kIsWeb) {
+      if (_resolvedWebBaseUrl != null) list.add(_resolvedWebBaseUrl!);
+      const webCandidates = [
+        'http://127.0.0.1:8000/api',
+        'http://localhost:8000/api',
+        'http://shadhinjatra.test/api',
+        'http://192.168.0.7:8000/api',
+      ];
+      for (final u in webCandidates) {
+        if (!list.contains(u)) list.add(u);
+      }
+    } else {
+      const nativeCandidates = [
+        'http://192.168.0.7:8000/api',
+        'http://10.0.2.2:8000/api',
+        'http://shadhinjatra.test/api',
+        'http://127.0.0.1:8000/api',
+      ];
+      for (final u in nativeCandidates) {
+        if (!list.contains(u)) list.add(u);
+      }
+    }
+    return list;
+  }
+
   static const String userAgent = 'ShadhinJatraDriver/1.0';
 
   static Future<Map<String, String>> getHeaders() async {
@@ -30,59 +57,48 @@ class AuthService {
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      'User-Agent': userAgent,
+      if (!kIsWeb) 'User-Agent': userAgent,
       if (token != null) 'Authorization': 'Bearer $token',
     };
   }
 
   static Future<Map<String, dynamic>> login(String email, String password) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-        }),
-      );
+    final candidates = candidateUrls;
+    dynamic lastError;
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == true && data['token'] != null) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('auth_token', data['token']);
-        }
-        return data;
-      } else {
-        return jsonDecode(response.body);
-      }
-    } catch (e) {
-      if (kIsWeb && _resolvedWebBaseUrl == null) {
-        try {
-          const fallbackUrl = 'http://shadhinjatra.test/api';
-          final res2 = await http.post(
-            Uri.parse('$fallbackUrl/login'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'email': email,
-              'password': password,
-            }),
-          );
-          if (res2.statusCode == 200) {
-            final data = jsonDecode(res2.body);
-            if (data['success'] == true && data['token'] != null) {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setString('auth_token', data['token']);
-              _resolvedWebBaseUrl = fallbackUrl;
-            }
-            return data;
-          } else {
-            return jsonDecode(res2.body);
+    for (final candidate in candidates) {
+      try {
+        final response = await http.post(
+          Uri.parse('$candidate/login'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: jsonEncode({
+            'email': email,
+            'password': password,
+          }),
+        ).timeout(const Duration(seconds: 5));
+
+        if (kIsWeb) _resolvedWebBaseUrl = candidate;
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['success'] == true && data['token'] != null) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('auth_token', data['token']);
           }
-        } catch (_) {}
+          return data;
+        } else {
+          return jsonDecode(response.body);
+        }
+      } catch (e) {
+        lastError = e;
+        continue;
       }
-      return {'success': false, 'message': 'Network error: $e'};
     }
+
+    return {'success': false, 'message': 'Network error: $lastError'};
   }
 
   static Future<Map<String, dynamic>> register(String name, String email, String phone, String vehicleType, String password) async {
@@ -383,6 +399,200 @@ class AuthService {
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  /// Alias for rejectRide
+  static Future<Map<String, dynamic>> declineRide(int rideId) => rejectRide(rideId);
+
+  /// Cancel active ride by driver with reason
+  static Future<Map<String, dynamic>> cancelRide(int rideId, {String? reason}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rides/$rideId/cancel'),
+        headers: headers,
+        body: jsonEncode({
+          'reason': reason ?? 'ড্রাইভার কর্তৃক বাতিল',
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Fetch single ride request preview details.
+  static Future<Map<String, dynamic>> fetchRideRequestPreview(int rideId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/driver/ride/$rideId/request-preview'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Fetch active accepted ride details (passenger, pickup, distance, ETA, navigation)
+  static Future<Map<String, dynamic>> fetchActiveRideDetails(int rideId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/driver/ride/$rideId/active-details'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      // Fallback to tracking
+      try {
+        final trackingRes = await http.get(Uri.parse('$baseUrl/rides/$rideId/tracking'), headers: headers);
+        return jsonDecode(trackingRes.body);
+      } catch (_) {
+        return {'success': false, 'message': 'Network error: $e'};
+      }
+    }
+  }
+
+  /// Mark driver as arrived at pickup
+  static Future<Map<String, dynamic>> markRideArrived(int rideId, {double? lat, double? lng}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/ride/$rideId/arrived'),
+        headers: headers,
+        body: jsonEncode({
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+        }),
+      );
+      final data = jsonDecode(response.body);
+      if (data['success'] == true) return data;
+    } catch (_) {}
+
+    // Fallback to /rides/$rideId/status
+    return updateRideStatus(rideId, 'arrived', lat: lat, lng: lng);
+  }
+
+  /// Verify passenger's 6-digit OTP code and start trip
+  static Future<Map<String, dynamic>> verifyOtpAndStartTrip(int rideId, String otp, {double? lat, double? lng}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/ride/$rideId/verify-otp-start'),
+        headers: headers,
+        body: jsonEncode({
+          'otp': otp,
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (_) {
+      // Fallback to /rides/$rideId/status
+      return updateRideStatus(rideId, 'started', lat: lat, lng: lng, otp: otp);
+    }
+  }
+
+  /// Request passenger OTP resend (enforces 60-second cooldown and 5 resend limit)
+  static Future<Map<String, dynamic>> resendOtp(int rideId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rides/$rideId/resend-otp'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Complete and End the ongoing ride trip
+  static Future<Map<String, dynamic>> endTrip(int rideId, {double? lat, double? lng}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/ride/$rideId/end'),
+        headers: headers,
+        body: jsonEncode({
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (_) {
+      return updateRideStatus(rideId, 'completed', lat: lat, lng: lng);
+    }
+  }
+
+  /// Driver rates customer/passenger after completed trip
+  static Future<Map<String, dynamic>> ratePassenger(
+    int rideId, {
+    required int rating,
+    String? feedback,
+    List<String>? tags,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/ride/$rideId/rate-passenger'),
+        headers: headers,
+        body: jsonEncode({
+          'rating': rating,
+          if (feedback != null && feedback.isNotEmpty) 'feedback': feedback,
+          if (tags != null && tags.isNotEmpty) 'tags': tags,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Driver skips rating passenger
+  static Future<Map<String, dynamic>> skipPassengerRating(int rideId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/ride/$rideId/skip-rating'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Fetch full completed ride receipt and summary
+  static Future<Map<String, dynamic>> getCompletedRideSummary(int rideId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/ride/$rideId/completed-summary'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Fetch nearby peer drivers for map visualization
+  static Future<Map<String, dynamic>> fetchNearbyDrivers({
+    double? lat,
+    double? lng,
+    double radius = 5.0,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      String query = 'radius=$radius';
+      if (lat != null && lng != null) {
+        query += '&latitude=$lat&longitude=$lng';
+      }
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/nearby-drivers?$query'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
     }
   }
 
@@ -862,6 +1072,75 @@ class AuthService {
     final headers = await getHeaders();
     try {
       final response = await http.get(Uri.parse('$baseUrl/safety/sos'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Fetch active ride tracking for current driver
+  static Future<Map<String, dynamic>> fetchRideTracking([int? rideId]) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) {
+      return {'success': false, 'message': 'Unauthenticated'};
+    }
+
+    try {
+      final url = rideId != null 
+          ? '$baseUrl/rides/$rideId/tracking' 
+          : '$baseUrl/rides/current/tracking';
+      final response = await http.get(Uri.parse(url), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Alias for fetchRideTracking
+  static Future<Map<String, dynamic>> fetchActiveRide() async {
+    return fetchRideTracking();
+  }
+
+  /// Fetch driver subscription status, admin-configured pricing, duration, and expiry alert.
+  static Future<Map<String, dynamic>> fetchSubscriptionStatus() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/subscription/status'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Subscribe or renew monthly driver subscription via bKash, Nagad, Rocket, SSLCommerz, or Wallet.
+  static Future<Map<String, dynamic>> subscribeOrRenew({
+    required String paymentMethod,
+    String? transactionId,
+    String? phoneNumber,
+  }) async {
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Unauthenticated'};
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/subscription/subscribe'),
+        headers: headers,
+        body: jsonEncode({
+          'payment_method': paymentMethod,
+          'transaction_id': transactionId,
+          'phone_number': phoneNumber,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Fetch driver subscription payment history.
+  static Future<Map<String, dynamic>> fetchSubscriptionHistory() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/subscription/history'), headers: headers);
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};

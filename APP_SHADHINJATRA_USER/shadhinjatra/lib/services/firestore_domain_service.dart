@@ -17,13 +17,12 @@ class FirestoreDomainService {
   static String get defaultBaseUrl {
     if (kIsWeb) return 'http://127.0.0.1:8000/api';
     try {
-      if (Platform.isAndroid) return 'http://10.0.2.2:8000/api';
-      if (Platform.isIOS) return 'http://127.0.0.1:8000/api';
+      if (Platform.isAndroid || Platform.isIOS) return 'http://192.168.0.7:8000/api';
       if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-        return 'http://127.0.0.1:8000/api';
+        return 'http://192.168.0.7:8000/api';
       }
     } catch (_) {}
-    return 'http://127.0.0.1:8000/api';
+    return 'http://192.168.0.7:8000/api';
   }
 
   static String get baseUrl => _cachedBaseUrl ?? defaultBaseUrl;
@@ -31,6 +30,70 @@ class FirestoreDomainService {
   static String get storageUrl =>
       _cachedStorageUrl ?? baseUrl.replaceAll('/api', '/storage');
   static String get host => baseUrl.replaceAll('/api', '');
+
+  /// List of candidate base URLs to attempt in order of priority.
+  static List<String> get candidateUrls {
+    final list = <String>[];
+    
+    // 1. Current resolved base URL
+    final current = baseUrl.trim();
+    if (current.isNotEmpty) list.add(current);
+
+    // 2. Firestore-configured fallback URL if available
+    final fb = _cachedFallbackUrl?.trim();
+    if (fb != null && fb.isNotEmpty && !list.contains(fb)) {
+      list.add(fb);
+    }
+
+    // 3. Platform-specific fallback candidates
+    final platformFallbacks = kIsWeb
+        ? const [
+            'http://127.0.0.1:8000/api',
+            'http://localhost:8000/api',
+            'http://shadhinjatra.test/api',
+            'http://192.168.0.7:8000/api',
+          ]
+        : const [
+            'http://192.168.0.7:8000/api',
+            'http://10.0.2.2:8000/api',
+            'http://shadhinjatra.test/api',
+            'http://127.0.0.1:8000/api',
+          ];
+
+    for (final url in platformFallbacks) {
+      if (!list.contains(url)) {
+        list.add(url);
+      }
+    }
+
+    return list;
+  }
+
+  /// Dynamically updates the active baseUrl when an endpoint responds successfully.
+  static void updateWorkingBaseUrl(String workingUrl) {
+    if (workingUrl.trim().isEmpty) return;
+    String normalized = workingUrl.trim();
+    if (normalized.endsWith('/')) {
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
+    if (!normalized.endsWith('/api')) {
+      normalized = '$normalized/api';
+    }
+
+    if (_cachedBaseUrl == normalized) return;
+
+    _cachedBaseUrl = normalized;
+    _cachedStorageUrl = normalized.replaceAll('/api', '/storage');
+
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString(_prefBaseUrlKey, normalized);
+      prefs.setString(_prefStorageUrlKey, _cachedStorageUrl!);
+    }).catchError((e) {
+      debugPrint('FirestoreDomainService: failed saving working baseUrl: $e');
+    });
+
+    debugPrint('FirestoreDomainService: Active API endpoint set to: $normalized');
+  }
 
   /// Fetches domain and API host configuration from Firebase Firestore
   /// ONLY at app startup time. Never invoked per HTTP request.

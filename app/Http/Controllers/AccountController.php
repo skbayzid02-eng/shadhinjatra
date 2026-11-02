@@ -161,7 +161,7 @@ class AccountController extends Controller
 
         $notifications = \App\Models\Notification::where('user_id', $user->id)
             ->latest()
-            ->take(50)
+            ->take(100)
             ->get();
 
         $unreadCount = \App\Models\Notification::where('user_id', $user->id)
@@ -175,6 +175,7 @@ class AccountController extends Controller
                 'message' => $notif->message,
                 'type' => $notif->type,
                 'is_read' => (bool) $notif->is_read,
+                'is_deleted' => (bool) $notif->is_deleted,
                 'time' => $notif->created_at ? $notif->created_at->diffForHumans() : 'Just now',
                 'created_at' => $notif->created_at ? $notif->created_at->toIso8601String() : null,
                 'data' => $notif->data ?? [],
@@ -183,20 +184,27 @@ class AccountController extends Controller
 
         // Group notifications by type for tabs
         $rideAlerts = $formatted->filter(function ($item) {
-            return in_array($item['type'], ['ride_request', 'ride_confirmed', 'ride_accepted', 'ride_completed', 'ride_cancelled', 'success', 'info']);
+            return in_array($item['type'], ['ride_request', 'ride_confirmed', 'ride_accepted', 'ride_arrived', 'ride_started', 'ride_completed', 'ride_cancelled', 'driver_accepted', 'driver_arrived', 'success', 'info']);
         })->values();
 
         $offers = $formatted->filter(function ($item) {
-            return in_array($item['type'], ['promo', 'offer', 'cashback']);
+            return in_array($item['type'], ['promo', 'offer', 'cashback', 'discount', 'coupon']);
         })->values();
 
         $systemUpdates = $formatted->filter(function ($item) {
-            return in_array($item['type'], ['system', 'warning', 'update']);
+            return in_array($item['type'], ['system', 'warning', 'update', 'security', 'announcement', 'payment']);
         })->values();
 
         return response()->json([
             'success' => true,
             'unread_count' => $unreadCount,
+            'total_count' => $formatted->count(),
+            'counts' => [
+                'all' => $formatted->count(),
+                'ride_alerts' => $rideAlerts->count(),
+                'offers' => $offers->count(),
+                'system_updates' => $systemUpdates->count(),
+            ],
             'data' => [
                 'all' => $formatted,
                 'ride_alerts' => $rideAlerts,
@@ -207,6 +215,18 @@ class AccountController extends Controller
                 'push_notifications' => (bool) $user->push_notifications,
                 'sms_notifications' => (bool) $user->sms_notifications,
             ]
+        ]);
+    }
+
+    public function unreadNotificationsCount(Request $request)
+    {
+        $unreadCount = \App\Models\Notification::where('user_id', $request->user()->id)
+            ->where('is_read', false)
+            ->count();
+
+        return response()->json([
+            'success' => true,
+            'unread_count' => $unreadCount,
         ]);
     }
 
@@ -236,6 +256,145 @@ class AccountController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Notification marked as read',
+            'unread_count' => $unreadCount,
+        ]);
+    }
+
+    public function markSingleNotificationUnread(Request $request, $id)
+    {
+        \App\Models\Notification::where('user_id', $request->user()->id)
+            ->where('id', $id)
+            ->update(['is_read' => false]);
+
+        $unreadCount = \App\Models\Notification::where('user_id', $request->user()->id)
+            ->where('is_read', false)
+            ->count();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Notification marked as unread',
+            'unread_count' => $unreadCount,
+        ]);
+    }
+
+    public function destroyNotification(Request $request, $id)
+    {
+        $notification = \App\Models\Notification::where('user_id', $request->user()->id)
+            ->where('id', $id)
+            ->first();
+
+        if (!$notification) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Notification not found',
+            ], 404);
+        }
+
+        $notification->delete();
+
+        $unreadCount = \App\Models\Notification::where('user_id', $request->user()->id)
+            ->where('is_read', false)
+            ->count();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Notification deleted successfully',
+            'id' => (int) $id,
+            'unread_count' => $unreadCount,
+        ]);
+    }
+
+    public function bulkDeleteNotifications(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required|array|min:1',
+            'ids.*' => 'integer',
+        ]);
+
+        $deletedCount = 0;
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($request, $validated, &$deletedCount) {
+            $notifications = \App\Models\Notification::where('user_id', $request->user()->id)
+                ->whereIn('id', $validated['ids'])
+                ->get();
+
+            foreach ($notifications as $notification) {
+                $notification->delete();
+                $deletedCount++;
+            }
+        });
+
+        $unreadCount = \App\Models\Notification::where('user_id', $request->user()->id)
+            ->where('is_read', false)
+            ->count();
+
+        return response()->json([
+            'success' => true,
+            'message' => "{$deletedCount} notifications deleted successfully",
+            'deleted_count' => $deletedCount,
+            'deleted_ids' => $validated['ids'],
+            'unread_count' => $unreadCount,
+        ]);
+    }
+
+    public function deleteAllNotifications(Request $request)
+    {
+        $deletedCount = 0;
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($request, &$deletedCount) {
+            $notifications = \App\Models\Notification::where('user_id', $request->user()->id)->get();
+
+            foreach ($notifications as $notification) {
+                $notification->delete();
+                $deletedCount++;
+            }
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'All notifications permanently deleted successfully',
+            'deleted_count' => $deletedCount,
+            'unread_count' => 0,
+        ]);
+    }
+
+    public function restoreNotifications(Request $request)
+    {
+        $ids = $request->input('ids');
+        if ($request->has('id') && empty($ids)) {
+            $ids = [$request->input('id')];
+        }
+
+        if (empty($ids) || !is_array($ids)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No notification IDs provided to restore',
+            ], 422);
+        }
+
+        $restoredCount = 0;
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($request, $ids, &$restoredCount) {
+            $notifications = \App\Models\Notification::onlyTrashed()
+                ->where('user_id', $request->user()->id)
+                ->whereIn('id', $ids)
+                ->get();
+
+            foreach ($notifications as $notification) {
+                $notification->restore();
+                $restoredCount++;
+            }
+        });
+
+        $unreadCount = \App\Models\Notification::where('user_id', $request->user()->id)
+            ->where('is_read', false)
+            ->count();
+
+        return response()->json([
+            'success' => true,
+            'message' => "{$restoredCount} notifications restored successfully",
+            'restored_count' => $restoredCount,
+            'restored_ids' => $ids,
             'unread_count' => $unreadCount,
         ]);
     }

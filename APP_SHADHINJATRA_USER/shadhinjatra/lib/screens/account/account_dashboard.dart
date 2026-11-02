@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shadhinjatra/services/auth_service.dart';
 import 'package:shadhinjatra/screens/account/profile/profile_screen.dart';
 import 'package:shadhinjatra/screens/account/wallet/wallet_screen.dart';
+import 'package:shadhinjatra/screens/account/earnings/earnings_screen.dart';
+import 'package:shadhinjatra/screens/account/subscription/subscription_screen.dart';
 import 'package:shadhinjatra/screens/account/saved_places/saved_places_screen.dart';
 import 'package:shadhinjatra/screens/account/settings/settings_screen.dart';
 import 'package:shadhinjatra/screens/account/safety/safety_screen.dart';
@@ -13,7 +16,6 @@ import 'package:shadhinjatra/screens/account/about/about_screen.dart';
 import 'package:shadhinjatra/screens/account/privacy/privacy_security_screen.dart';
 import 'package:shadhinjatra/screens/account/promotions_screen.dart';
 import 'package:shadhinjatra/screens/activity_screen.dart';
-import 'package:shadhinjatra/screens/login_screen.dart';
 
 class AccountDashboard extends StatefulWidget {
   const AccountDashboard({super.key});
@@ -83,6 +85,10 @@ class _AccountDashboardState extends State<AccountDashboard> {
             
             // Financials
             _buildMenuSection([
+              // Driver Subscription (Monthly)
+              _buildMenuItem(Icons.card_membership, 'Driver Subscription (সাবস্ক্রিপশন)', () => _navigateTo(const SubscriptionScreen())),
+              // Earnings & Payouts
+              _buildMenuItem(Icons.monetization_on, 'Earnings & Payouts', () => _navigateTo(const EarningsScreen())),
               // 2. Wallet / Payment
               _buildMenuItem(Icons.account_balance_wallet, 'Wallet / Payment', () => _navigateTo(const WalletScreen())),
               // 3. Payment Methods
@@ -212,11 +218,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
   Future<void> _logout() async {
     await AuthService.logout();
     if (mounted) {
-       Navigator.pushAndRemoveUntil(
-         context, 
-         MaterialPageRoute(builder: (_) => const LoginScreen()), 
-         (route) => false
-       );
+      context.go('/login');
     }
   }
 }

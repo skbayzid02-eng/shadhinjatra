@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Notification extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'user_id',
@@ -17,12 +18,28 @@ class Notification extends Model
         'type',
         'data',
         'is_read',
+        'is_deleted',
     ];
 
     protected $casts = [
         'data' => 'array',
         'is_read' => 'boolean',
+        'is_deleted' => 'boolean',
+        'deleted_at' => 'datetime',
     ];
+
+    protected static function booted()
+    {
+        static::deleting(function ($notification) {
+            $notification->is_deleted = true;
+            $notification->saveQuietly();
+        });
+
+        static::restoring(function ($notification) {
+            $notification->is_deleted = false;
+            $notification->saveQuietly();
+        });
+    }
 
     public function user()
     {

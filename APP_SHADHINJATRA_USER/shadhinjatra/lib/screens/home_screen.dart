@@ -5,11 +5,10 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
+import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shadhinjatra/services/auth_service.dart';
-import 'package:shadhinjatra/screens/account/notifications/notifications_screen.dart';
-import 'package:shadhinjatra/screens/account/account_dashboard.dart';
-import 'package:shadhinjatra/screens/chat_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:ui';
 
@@ -36,17 +35,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   double _distanceKm = 0.0;
   int _durationMins = 0;
-  String _selectedVehicle = 'Car';
+  String _selectedVehicle = 'Private Car';
   double _fareAmount = 0.0;
-  String _paymentMethod = 'online';
+  String _paymentMethod = 'cash';
   String _userName = '';
 
   List<Map<String, dynamic>> _vehicles = [
-    {'name': 'Car', 'icon': 'directions_car', 'base_fare': 50.0, 'per_km_rate': 20.0, 'per_min_rate': 2.0, 'min_fare': 80.0, 'capacity': '2-4 pass'},
-    {'name': 'Bike', 'icon': 'motorcycle', 'base_fare': 30.0, 'per_km_rate': 12.0, 'per_min_rate': 1.0, 'min_fare': 50.0, 'capacity': '1 pass'},
-    {'name': 'CNG', 'icon': 'electric_rickshaw', 'base_fare': 40.0, 'per_km_rate': 15.0, 'per_min_rate': 1.5, 'min_fare': 60.0, 'capacity': '2-3 pass'},
-    {'name': 'Rickshaw', 'icon': 'pedal_bike', 'base_fare': 20.0, 'per_km_rate': 10.0, 'per_min_rate': 1.0, 'min_fare': 30.0, 'capacity': '1-2 pass'},
-    {'name': 'Microbus', 'icon': 'airport_shuttle', 'base_fare': 100.0, 'per_km_rate': 25.0, 'per_min_rate': 3.0, 'min_fare': 150.0, 'capacity': '7-12 pass'},
+    {'name': 'Private Car', 'icon': 'directions_car', 'base_fare': 60.0, 'per_km_rate': 22.0, 'per_min_rate': 2.5, 'min_fare': 90.0, 'capacity': '4 pass', 'available_drivers_count': 0, 'eta_text': 'No Drivers Available'},
+    {'name': 'Microbus', 'icon': 'airport_shuttle', 'base_fare': 120.0, 'per_km_rate': 28.0, 'per_min_rate': 3.5, 'min_fare': 180.0, 'capacity': '7-12 pass', 'available_drivers_count': 0, 'eta_text': 'No Drivers Available'},
+    {'name': 'CNG', 'icon': 'electric_rickshaw', 'base_fare': 40.0, 'per_km_rate': 15.0, 'per_min_rate': 1.5, 'min_fare': 60.0, 'capacity': '3 pass', 'available_drivers_count': 0, 'eta_text': 'No Drivers Available'},
+    {'name': 'Motorcycle', 'icon': 'motorcycle', 'base_fare': 30.0, 'per_km_rate': 12.0, 'per_min_rate': 1.0, 'min_fare': 50.0, 'capacity': '1 pass', 'available_drivers_count': 0, 'eta_text': 'No Drivers Available'},
+    {'name': 'Rickshaw', 'icon': 'pedal_bike', 'base_fare': 20.0, 'per_km_rate': 10.0, 'per_min_rate': 1.0, 'min_fare': 30.0, 'capacity': '2 pass', 'available_drivers_count': 0, 'eta_text': 'No Drivers Available'},
+    {'name': 'Easy Bike', 'icon': 'electric_moped', 'base_fare': 25.0, 'per_km_rate': 12.0, 'per_min_rate': 1.2, 'min_fare': 40.0, 'capacity': '4-6 pass', 'available_drivers_count': 0, 'eta_text': 'No Drivers Available'},
+    {'name': 'Cargo Vehicle', 'icon': 'local_shipping', 'base_fare': 150.0, 'per_km_rate': 35.0, 'per_min_rate': 4.0, 'min_fare': 250.0, 'capacity': '1-2 ton', 'available_drivers_count': 0, 'eta_text': 'No Drivers Available'},
   ];
   bool _isRideRequested = false;
   int? _currentRideId;
@@ -62,14 +63,24 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _nearbyDrivers = [];
 
   String _normalizeVehicle(String? name) {
-    if (name == null || name.isEmpty) return 'Car';
+    if (name == null || name.isEmpty) return 'Private Car';
     final lower = name.toLowerCase();
-    if (lower.contains('car') || lower.contains('private')) return 'Car';
-    if (lower.contains('bike') || lower.contains('motor') || lower.contains('scooter')) return 'Bike';
-    if (lower.contains('cng')) return 'CNG';
-    if (lower.contains('rickshaw') || lower.contains('bicycle') || lower.contains('cycle')) return 'Rickshaw';
+    if (lower.contains('private') || lower.contains('car')) return 'Private Car';
     if (lower.contains('micro') || lower.contains('van')) return 'Microbus';
-    return 'Car';
+    if (lower.contains('cng') || lower.contains('auto')) return 'CNG';
+    if (lower.contains('motor') || lower.contains('bike') || lower.contains('scooter')) return 'Motorcycle';
+    if (lower.contains('rickshaw') || lower.contains('cycle')) return 'Rickshaw';
+    if (lower.contains('easy') || lower.contains('tomtom') || lower.contains('moped')) return 'Easy Bike';
+    if (lower.contains('cargo') || lower.contains('truck') || lower.contains('pickup')) return 'Cargo Vehicle';
+    return 'Private Car';
+  }
+
+  /// Safely parse numeric or string coordinate values to double with null safety.
+  static double? _parseDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value.trim());
+    return null;
   }
 
   @override
@@ -114,27 +125,36 @@ class _HomeScreenState extends State<HomeScreen> {
             }
 
             final p = data['pickup'];
-            if (p != null && p['latitude'] != null && p['longitude'] != null) {
-              _pickupLatLng = LatLng((p['latitude'] as num).toDouble(), (p['longitude'] as num).toDouble());
+            if (p != null) {
+              final pLat = _parseDouble(p['latitude'] ?? p['lat']);
+              final pLng = _parseDouble(p['longitude'] ?? p['lng'] ?? p['lon']);
+              if (pLat != null && pLng != null && pLat != 0.0 && pLng != 0.0) {
+                _pickupLatLng = LatLng(pLat, pLng);
+              }
               if (p['location'] != null && p['location'].toString().isNotEmpty) {
                 _pickupController.text = p['location'].toString();
               }
             }
 
             final d = data['dropoff'];
-            if (d != null && d['latitude'] != null && d['longitude'] != null) {
-              _dropoffLatLng = LatLng((d['latitude'] as num).toDouble(), (d['longitude'] as num).toDouble());
+            if (d != null) {
+              final dLat = _parseDouble(d['latitude'] ?? d['lat']);
+              final dLng = _parseDouble(d['longitude'] ?? d['lng'] ?? d['lon']);
+              if (dLat != null && dLng != null && dLat != 0.0 && dLng != 0.0) {
+                _dropoffLatLng = LatLng(dLat, dLng);
+              }
               if (d['location'] != null && d['location'].toString().isNotEmpty) {
                 _dropoffController.text = d['location'].toString();
               }
             }
 
             final driverData = data['driver'] as Map<String, dynamic>?;
-            if (driverData != null && driverData['latitude'] != null && driverData['longitude'] != null) {
-              _driverLatLng = LatLng(
-                (driverData['latitude'] as num).toDouble(),
-                (driverData['longitude'] as num).toDouble(),
-              );
+            if (driverData != null) {
+              final drvLat = _parseDouble(driverData['latitude'] ?? driverData['lat']);
+              final drvLng = _parseDouble(driverData['longitude'] ?? driverData['lng'] ?? driverData['lon']);
+              if (drvLat != null && drvLng != null && drvLat != 0.0 && drvLng != 0.0) {
+                _driverLatLng = LatLng(drvLat, drvLng);
+              }
             }
           });
 
@@ -176,13 +196,38 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _vehicles = dbVehicles;
           if (!_vehicles.any((v) => v['name'] == _selectedVehicle)) {
-            _selectedVehicle = _vehicles.first['name']?.toString() ?? 'Car';
+            _selectedVehicle = _vehicles.first['name']?.toString() ?? 'Private Car';
           }
         });
         _updateFare();
       }
     } catch (e) {
       debugPrint('Failed to load dynamic vehicles from database: $e');
+    }
+  }
+
+  Future<void> _fetchDynamicFares() async {
+    if (_distanceKm <= 0) return;
+    try {
+      final res = await AuthService.calculateFares(
+        distanceKm: _distanceKm,
+        durationMins: _durationMins,
+        pickupLat: _pickupLatLng?.latitude,
+        pickupLon: _pickupLatLng?.longitude,
+      );
+      if (res['success'] == true && res['data'] != null && mounted) {
+        final List list = res['data'];
+        final updatedList = list.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+        setState(() {
+          _vehicles = updatedList;
+          if (!_vehicles.any((v) => v['name'] == _selectedVehicle)) {
+            _selectedVehicle = _vehicles.first['name']?.toString() ?? 'Private Car';
+          }
+          _updateFare();
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch dynamic fares from backend: $e');
     }
   }
 
@@ -196,17 +241,37 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<Iterable<Map<String, dynamic>>> _searchLocation(String query) async {
-    if (query.length < 3) return const Iterable<Map<String, dynamic>>.empty();
+    final cleanQuery = query.trim();
+    if (cleanQuery.length < 3) return const Iterable<Map<String, dynamic>>.empty();
     try {
+      final encodedQuery = Uri.encodeComponent(cleanQuery);
       final response = await http.get(
-        Uri.parse('https://nominatim.openstreetmap.org/search?format=json&q=$query&countrycodes=bd&limit=10'),
-        headers: {'User-Agent': AuthService.userAgent},
+        Uri.parse('https://nominatim.openstreetmap.org/search?format=json&q=$encodedQuery&countrycodes=bd&limit=10'),
+        headers: AuthService.getOsmHeaders(),
       );
-      final data = jsonDecode(response.body) as List;
-      return data.map((e) => e as Map<String, dynamic>).toList();
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as List;
+        return data.map((e) => e as Map<String, dynamic>).toList();
+      }
     } catch (e) {
-      return const Iterable<Map<String, dynamic>>.empty();
+      debugPrint('Direct OpenStreetMap Nominatim search error: $e');
     }
+
+    // Fallback to backend geocoding proxy if direct OSM fails
+    try {
+      final backendRes = await AuthService.geocode(cleanQuery);
+      if (backendRes['success'] == true && backendRes['lat'] != null) {
+        return [
+          {
+            'display_name': backendRes['display_name'] ?? cleanQuery,
+            'lat': backendRes['lat'].toString(),
+            'lon': backendRes['lon'].toString(),
+          }
+        ];
+      }
+    } catch (_) {}
+
+    return const Iterable<Map<String, dynamic>>.empty();
   }
 
   Future<void> _getUserLocation() async {
@@ -232,6 +297,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   double _calculateFareForVehicle(Map<String, dynamic> vehicle) {
+    if (vehicle['fare_amount'] != null && (vehicle['fare_amount'] as num) > 0) {
+      return (vehicle['fare_amount'] as num).toDouble();
+    }
     if (_distanceKm == 0) return 0.0;
     final base = (vehicle['base_fare'] as num?)?.toDouble() ?? 0.0;
     final perKm = (vehicle['per_km_rate'] as num?)?.toDouble() ?? 0.0;
@@ -246,7 +314,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _updateFare() {
-    if (_distanceKm > 0 && _vehicles.isNotEmpty) {
+    if (_vehicles.isNotEmpty) {
       final vehicle = _vehicles.firstWhere(
         (v) => v['name'] == _selectedVehicle,
         orElse: () => _vehicles.first,
@@ -258,19 +326,35 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _fetchRoute() async {
-    if (_pickupController.text.isEmpty || _dropoffController.text.isEmpty) return;
+    if (_pickupController.text.trim().isEmpty || _dropoffController.text.trim().isEmpty) return;
 
     setState(() => _isRouting = true);
 
     try {
-      if (_pickupController.text != "Current Location" && _pickupLatLng == null) {
-        final pRes = await AuthService.geocode(_pickupController.text);
-        if (pRes['success'] == true) _pickupLatLng = LatLng(double.parse(pRes['lat']), double.parse(pRes['lon']));
+      if (_pickupLatLng == null) {
+        if (_pickupController.text == "Current Location") {
+          _pickupLatLng = _currentLocation;
+        } else {
+          final pRes = await AuthService.geocode(_pickupController.text);
+          if (pRes['success'] == true) {
+            final pLat = _parseDouble(pRes['lat'] ?? pRes['latitude']);
+            final pLon = _parseDouble(pRes['lon'] ?? pRes['lng'] ?? pRes['longitude']);
+            if (pLat != null && pLon != null) {
+              _pickupLatLng = LatLng(pLat, pLon);
+            }
+          }
+        }
       }
 
-      final dRes = await AuthService.geocode(_dropoffController.text);
-      if (dRes['success'] == true) {
-        _dropoffLatLng = LatLng(double.parse(dRes['lat']), double.parse(dRes['lon']));
+      if (_dropoffLatLng == null) {
+        final dRes = await AuthService.geocode(_dropoffController.text);
+        if (dRes['success'] == true) {
+          final dLat = _parseDouble(dRes['lat'] ?? dRes['latitude']);
+          final dLon = _parseDouble(dRes['lon'] ?? dRes['lng'] ?? dRes['longitude']);
+          if (dLat != null && dLon != null) {
+            _dropoffLatLng = LatLng(dLat, dLon);
+          }
+        }
       }
 
       if (_pickupLatLng != null && _dropoffLatLng != null) {
@@ -281,19 +365,69 @@ class _HomeScreenState extends State<HomeScreen> {
         if (routeRes['success'] == true) {
           final dist = (routeRes['distance'] as num).toDouble() / 1000.0;
           final durSeconds = (routeRes['duration'] as num).toDouble();
-          final geom = routeRes['geometry'] as List<dynamic>;
+          
+          List<LatLng> points = [];
+          final rawGeom = routeRes['geometry'] ?? routeRes['polyline'];
+          if (rawGeom is List) {
+            for (final c in rawGeom) {
+              if (c is List && c.length >= 2) {
+                final lon = (c[0] as num).toDouble();
+                final lat = (c[1] as num).toDouble();
+                points.add(LatLng(lat, lon));
+              }
+            }
+          }
+          if (points.isEmpty) {
+            points = [_pickupLatLng!, _dropoffLatLng!];
+          }
 
           setState(() {
             _distanceKm = double.parse(dist.toStringAsFixed(1));
-            _durationMins = (durSeconds / 60.0).round();
-            _routePolyline = geom.map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())).toList();
+            _durationMins = max(3, (durSeconds / 60.0).round());
+            _routePolyline = points;
           });
 
           _updateFare();
+          await _fetchDynamicFares();
+          _fetchNearbyDrivers();
+
+          if (_routePolyline.isNotEmpty) {
+            final bounds = LatLngBounds.fromPoints(_routePolyline);
+            _mapController.fitCamera(
+              CameraFit.bounds(
+                bounds: bounds,
+                padding: const EdgeInsets.only(top: 100, bottom: 440, left: 40, right: 40),
+              ),
+            );
+          }
+        } else {
+          // Haversine fallback if external routing is temporarily unreachable
+          final double dLat = (_dropoffLatLng!.latitude - _pickupLatLng!.latitude) * (pi / 180.0);
+          final double dLon = (_dropoffLatLng!.longitude - _pickupLatLng!.longitude) * (pi / 180.0);
+          final double a = sin(dLat / 2) * sin(dLat / 2) +
+              cos(_pickupLatLng!.latitude * (pi / 180.0)) * cos(_dropoffLatLng!.latitude * (pi / 180.0)) *
+              sin(dLon / 2) * sin(dLon / 2);
+          final double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+          final double straightKm = 6371.0 * c;
+          final double fallbackDist = double.parse((straightKm * 1.35).toStringAsFixed(1));
+          final int fallbackDur = max(5, (fallbackDist / 25.0 * 60.0).round());
+
+          setState(() {
+            _distanceKm = fallbackDist;
+            _durationMins = fallbackDur;
+            _routePolyline = [_pickupLatLng!, _dropoffLatLng!];
+          });
+
+          _updateFare();
+          await _fetchDynamicFares();
+          _fetchNearbyDrivers();
 
           final bounds = LatLngBounds.fromPoints(_routePolyline);
           _mapController.fitCamera(
-            CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(80)),
+            CameraFit.bounds(
+              bounds: bounds,
+              padding: const EdgeInsets.only(top: 100, bottom: 440, left: 40, right: 40),
+            ),
           );
         }
       }
@@ -321,7 +455,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'pickup_location': _pickupController.text,
+          'pickup_location': _pickupController.text.isNotEmpty ? _pickupController.text : 'Current Location',
           'pickup_lat': _pickupLatLng?.latitude.toString(),
           'pickup_lon': _pickupLatLng?.longitude.toString(),
           'dropoff_location': _dropoffController.text,
@@ -329,6 +463,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'dropoff_lon': _dropoffLatLng?.longitude.toString(),
           'vehicle_type': _selectedVehicle,
           'fare_amount': _fareAmount,
+          'distance_km': _distanceKm,
           'payment_method': _paymentMethod,
         }),
       );
@@ -452,11 +587,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
           final driverData = data['driver'] as Map<String, dynamic>?;
           LatLng? newDriverPos;
-          if (driverData != null && driverData['latitude'] != null && driverData['longitude'] != null) {
-            newDriverPos = LatLng(
-              (driverData['latitude'] as num).toDouble(),
-              (driverData['longitude'] as num).toDouble(),
-            );
+          if (driverData != null) {
+            final drvLat = _parseDouble(driverData['latitude'] ?? driverData['lat']);
+            final drvLng = _parseDouble(driverData['longitude'] ?? driverData['lng'] ?? driverData['lon']);
+            if (drvLat != null && drvLng != null && drvLat != 0.0 && drvLng != 0.0) {
+              newDriverPos = LatLng(drvLat, drvLng);
+            }
           }
 
           setState(() {
@@ -464,17 +600,19 @@ class _HomeScreenState extends State<HomeScreen> {
             _driverLatLng = newDriverPos;
 
             // Sync locations if missing
-            if (_pickupLatLng == null && data['pickup']?['latitude'] != null) {
-              _pickupLatLng = LatLng(
-                (data['pickup']['latitude'] as num).toDouble(),
-                (data['pickup']['longitude'] as num).toDouble(),
-              );
+            if (_pickupLatLng == null && data['pickup'] != null) {
+              final pLat = _parseDouble(data['pickup']['latitude'] ?? data['pickup']['lat']);
+              final pLng = _parseDouble(data['pickup']['longitude'] ?? data['pickup']['lng'] ?? data['pickup']['lon']);
+              if (pLat != null && pLng != null && pLat != 0.0 && pLng != 0.0) {
+                _pickupLatLng = LatLng(pLat, pLng);
+              }
             }
-            if (_dropoffLatLng == null && data['dropoff']?['latitude'] != null) {
-              _dropoffLatLng = LatLng(
-                (data['dropoff']['latitude'] as num).toDouble(),
-                (data['dropoff']['longitude'] as num).toDouble(),
-              );
+            if (_dropoffLatLng == null && data['dropoff'] != null) {
+              final dLat = _parseDouble(data['dropoff']['latitude'] ?? data['dropoff']['lat']);
+              final dLng = _parseDouble(data['dropoff']['longitude'] ?? data['dropoff']['lng'] ?? data['dropoff']['lon']);
+              if (dLat != null && dLng != null && dLat != 0.0 && dLng != 0.0) {
+                _dropoffLatLng = LatLng(dLat, dLng);
+              }
             }
           });
 
@@ -942,8 +1080,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   // 5. Nearby Drivers markers
                   if (!_isRideRequested)
                     ..._nearbyDrivers.map((driver) {
-                      final lat = (driver['latitude'] as num?)?.toDouble() ?? 0.0;
-                      final lng = (driver['longitude'] as num?)?.toDouble() ?? 0.0;
+                      final lat = _parseDouble(driver['latitude'] ?? driver['lat']) ?? 0.0;
+                      final lng = _parseDouble(driver['longitude'] ?? driver['lng'] ?? driver['lon']) ?? 0.0;
                       if (lat == 0.0 || lng == 0.0) return null;
                       return Marker(
                         point: LatLng(lat, lng),
@@ -988,15 +1126,46 @@ class _HomeScreenState extends State<HomeScreen> {
                         if (_pickupLatLng != null) _mapController.move(_pickupLatLng!, 15.0);
                       });
                     } else {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountDashboard()));
+                      context.push('/account-dashboard');
                     }
                   }
                 ),
+                if (_distanceKm > 0 && !_isRideRequested)
+                  Flexible(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 3)),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.location_on, size: 16, color: Colors.redAccent),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              _dropoffController.text.isNotEmpty ? _dropoffController.text.split(',').first : 'Destination',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text('• ${_distanceKm}km', style: const TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
                 _buildFloatingIcon(
                   icon: _unreadNotificationsCount > 0 ? Icons.notifications_active : Icons.notifications_none_rounded,
                   badgeCount: _unreadNotificationsCount,
                   onTap: () async {
-                    await Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+                    await context.push('/notifications');
                     _fetchNotificationsCount();
                   },
                 )
@@ -1082,7 +1251,7 @@ class _HomeScreenState extends State<HomeScreen> {
             right: 20,
             bottom: _isRideRequested
                 ? ((_activeRideTracking != null && _activeRideTracking!['driver'] != null) ? 420 : 260)
-                : (_distanceKm > 0 ? 380 : 30),
+                : (_distanceKm > 0 ? 530 : 30),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1224,7 +1393,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSearchField({required TextEditingController controller, required String hint, required IconData icon, required Color iconColor, required bool isDestination}) {
+  Widget _buildSearchField({
+    required TextEditingController controller,
+    required String hint,
+    required IconData icon,
+    required Color iconColor,
+    required bool isDestination,
+  }) {
     return Autocomplete<Map<String, dynamic>>(
       optionsBuilder: (TextEditingValue textEditingValue) => _searchLocation(textEditingValue.text),
       displayStringForOption: (option) => option['display_name'] ?? '',
@@ -1265,12 +1440,19 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       onSelected: (option) {
         setState(() {
-          controller.text = option['display_name'];
-          if (isDestination) {
-            _dropoffLatLng = LatLng(double.parse(option['lat']), double.parse(option['lon']));
-            _fetchRoute();
-          } else {
-            _pickupLatLng = LatLng(double.parse(option['lat']), double.parse(option['lon']));
+          controller.text = option['display_name']?.toString() ?? '';
+          final optLat = _parseDouble(option['lat'] ?? option['latitude']);
+          final optLon = _parseDouble(option['lon'] ?? option['lng'] ?? option['longitude']);
+          if (optLat != null && optLon != null) {
+            if (isDestination) {
+              _dropoffLatLng = LatLng(optLat, optLon);
+              _fetchRoute();
+            } else {
+              _pickupLatLng = LatLng(optLat, optLon);
+              if (_dropoffLatLng != null) {
+                _fetchRoute();
+              }
+            }
           }
         });
       },
@@ -1281,6 +1463,13 @@ class _HomeScreenState extends State<HomeScreen> {
         return TextField(
           controller: fieldController,
           focusNode: focusNode,
+          textInputAction: isDestination ? TextInputAction.search : TextInputAction.next,
+          onSubmitted: (val) {
+            controller.text = val;
+            if (isDestination && val.trim().isNotEmpty) {
+              _fetchRoute();
+            }
+          },
           style: const TextStyle(fontWeight: FontWeight.w500),
           decoration: InputDecoration(
             hintText: hint,
@@ -1288,9 +1477,25 @@ class _HomeScreenState extends State<HomeScreen> {
             prefixIcon: Icon(icon, color: iconColor, size: 14),
             border: InputBorder.none,
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            suffixIcon: isDestination && _isRouting 
-               ? const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black)))
-               : null
+            suffixIcon: isDestination
+                ? (_isRouting
+                    ? const Padding(
+                        padding: EdgeInsets.all(14),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                        ),
+                      )
+                    : IconButton(
+                        icon: const Icon(Icons.arrow_forward_rounded, color: Colors.black87),
+                        tooltip: 'রুট খুঁজুন',
+                        onPressed: () {
+                          controller.text = fieldController.text;
+                          _fetchRoute();
+                        },
+                      ))
+                : null,
           ),
           onChanged: (val) => controller.text = val,
         );
@@ -1298,127 +1503,200 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  IconData _getVehicleIcon(String? iconName, [String? vehicleName]) {
+    final lower = '${iconName ?? ''} ${vehicleName ?? ''}'.toLowerCase();
+    if (lower.contains('private') || lower.contains('car')) return Icons.directions_car_rounded;
+    if (lower.contains('micro') || lower.contains('shuttle') || lower.contains('van')) return Icons.airport_shuttle_rounded;
+    if (lower.contains('cng') || lower.contains('electric_rickshaw') || lower.contains('auto') || lower.contains('tuk')) return Icons.electric_rickshaw_rounded;
+    if (lower.contains('motor') || lower.contains('bike') || lower.contains('two_wheeler') || lower.contains('scooter')) return Icons.motorcycle_rounded;
+    if (lower.contains('rickshaw') || lower.contains('pedal_bike') || lower.contains('cycle')) return Icons.pedal_bike_rounded;
+    if (lower.contains('easy') || lower.contains('moped') || lower.contains('electric_moped') || lower.contains('tomtom')) return Icons.electric_moped_rounded;
+    if (lower.contains('cargo') || lower.contains('shipping') || lower.contains('truck') || lower.contains('pickup')) return Icons.local_shipping_rounded;
+    return Icons.local_taxi_rounded;
+  }
+
   Widget _buildModernVehiclePanel() {
     return Container(
-      padding: const EdgeInsets.all(24.0),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20, offset: Offset(0, -5))],
+        boxShadow: [
+          BoxShadow(color: Colors.black12, blurRadius: 20, offset: Offset(0, -5)),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Center(
-             child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)))
+            child: Container(
+              width: 44,
+              height: 4,
+              decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+            ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Choose a ride', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 22, letterSpacing: -0.5)),
+              const Text(
+                'Choose a ride',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 22, letterSpacing: -0.5),
+              ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(12)),
-                child: Text('$_durationMins min • $_distanceKm km', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-              )
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.access_time_rounded, size: 14, color: Colors.black87),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_durationMins min • $_distanceKm km',
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           SizedBox(
-            height: 200,
+            height: 270,
             child: ListView.builder(
               padding: EdgeInsets.zero,
               physics: const BouncingScrollPhysics(),
               itemCount: _vehicles.length,
               itemBuilder: (context, index) {
                 final v = _vehicles[index];
-                final isSelected = _selectedVehicle == v['name'];
+                final vName = v['name']?.toString() ?? '';
+                final isSelected = _selectedVehicle == vName;
                 final fare = _calculateFareForVehicle(v);
-
-                IconData getIcon(String? name) {
-                  final lower = (name ?? '').toLowerCase();
-                  switch (lower) {
-                    case 'directions_car':
-                    case 'car':
-                    case 'private':
-                      return Icons.directions_car;
-                    case 'motorcycle':
-                    case 'bike':
-                    case 'two_wheeler':
-                    case 'scooter':
-                      return Icons.motorcycle;
-                    case 'electric_rickshaw':
-                    case 'cng':
-                    case 'auto':
-                    case 'tuk_tuk':
-                      return Icons.electric_rickshaw;
-                    case 'pedal_bike':
-                    case 'rickshaw':
-                    case 'bicycle':
-                    case 'cycle':
-                      return Icons.pedal_bike;
-                    case 'airport_shuttle':
-                    case 'microbus':
-                    case 'micro':
-                    case 'van':
-                      return Icons.airport_shuttle;
-                    case 'local_shipping':
-                    case 'truck':
-                    case 'cargo':
-                      return Icons.local_shipping;
-                    default:
-                      return Icons.local_taxi;
-                  }
-                }
+                final int driversCount = (v['available_drivers_count'] as num?)?.toInt() ?? 0;
+                final bool hasDrivers = (v['has_drivers'] == true) || driversCount > 0;
+                final String etaText = v['eta_text']?.toString() ?? (hasDrivers ? '${v['eta_minutes'] ?? 3} mins away' : 'No Drivers Available');
 
                 return GestureDetector(
                   onTap: () {
-                    setState(() => _selectedVehicle = v['name']?.toString() ?? 'Car');
+                    setState(() => _selectedVehicle = vName);
                     _updateFare();
                   },
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(16),
+                    duration: const Duration(milliseconds: 180),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: isSelected ? Colors.black : Colors.white,
                       border: Border.all(
                         color: isSelected ? Colors.black : Colors.grey.shade200,
-                        width: 2,
+                        width: isSelected ? 2 : 1.2,
                       ),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: isSelected ? [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 10, offset: const Offset(0, 4))] : [],
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: isSelected
+                          ? [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.15),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ]
+                          : [],
                     ),
                     child: Row(
                       children: [
-                        Icon(getIcon(v['icon']?.toString()), color: isSelected ? Colors.white : Colors.black87, size: 36),
-                        const SizedBox(width: 16),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: isSelected ? Colors.white.withValues(alpha: 0.15) : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(
+                            _getVehicleIcon(v['icon']?.toString(), vName),
+                            color: isSelected ? Colors.white : Colors.black87,
+                            size: 28,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(v['name']?.toString() ?? '', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: isSelected ? Colors.white : Colors.black)),
-                              const SizedBox(height: 4),
                               Row(
                                 children: [
-                                  Icon(Icons.person, size: 12, color: isSelected ? Colors.white70 : Colors.grey),
-                                  const SizedBox(width: 4),
-                                  Text(v['capacity']?.toString() ?? '', style: TextStyle(color: isSelected ? Colors.white70 : Colors.grey, fontSize: 12, fontWeight: FontWeight.w500)),
+                                  Text(
+                                    vName,
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                      color: isSelected ? Colors.white : Colors.black87,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '• ${v['capacity'] ?? ''}',
+                                    style: TextStyle(
+                                      color: isSelected ? Colors.white70 : Colors.grey.shade600,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
                                 ],
-                              )
+                              ),
+                              const SizedBox(height: 5),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: hasDrivers
+                                      ? (isSelected ? Colors.green.shade900.withValues(alpha: 0.7) : Colors.green.shade50)
+                                      : (isSelected ? Colors.orange.shade900.withValues(alpha: 0.7) : Colors.orange.shade50),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      hasDrivers ? Icons.check_circle_outline_rounded : Icons.info_outline_rounded,
+                                      size: 12,
+                                      color: hasDrivers
+                                          ? (isSelected ? Colors.greenAccent : Colors.green.shade800)
+                                          : (isSelected ? Colors.orangeAccent : Colors.orange.shade900),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      hasDrivers ? '$driversCount nearby • $etaText' : 'No Drivers Available',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: hasDrivers
+                                            ? (isSelected ? Colors.greenAccent : Colors.green.shade800)
+                                            : (isSelected ? Colors.orangeAccent : Colors.orange.shade900),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ],
                           ),
                         ),
-                        Text(
-                          '৳$fare',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                            color: isSelected ? Colors.white : Colors.black,
-                            letterSpacing: -0.5
-                          ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '৳${fare.toStringAsFixed(0)}',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                                color: isSelected ? Colors.white : Colors.black,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                            if (isSelected)
+                              const Icon(Icons.check_circle_rounded, color: Colors.white, size: 16),
+                          ],
                         ),
                       ],
                     ),
@@ -1427,68 +1705,63 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          // Payment Method Selector
           Row(
             children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => setState(() => _paymentMethod = 'cash'),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    decoration: BoxDecoration(
-                      color: _paymentMethod == 'cash' ? Colors.grey.shade200 : Colors.transparent,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.money, size: 20, color: _paymentMethod == 'cash' ? Colors.black : Colors.grey),
-                        const SizedBox(width: 8),
-                        Text('Cash', style: TextStyle(fontWeight: FontWeight.w700, color: _paymentMethod == 'cash' ? Colors.black : Colors.grey)),
-                      ],
-                    )
-                  ),
-                ),
+              _buildPaymentOption(
+                label: 'Cash',
+                method: 'cash',
+                icon: Icons.money_rounded,
               ),
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => setState(() => _paymentMethod = 'online'),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    decoration: BoxDecoration(
-                      color: _paymentMethod == 'online' ? Colors.grey.shade200 : Colors.transparent,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.credit_card, size: 20, color: _paymentMethod == 'online' ? Colors.black : Colors.grey),
-                        const SizedBox(width: 8),
-                        Text('Card / Digital', style: TextStyle(fontWeight: FontWeight.w700, color: _paymentMethod == 'online' ? Colors.black : Colors.grey)),
-                      ],
-                    )
-                  ),
-                ),
+              const SizedBox(width: 8),
+              _buildPaymentOption(
+                label: 'Wallet',
+                method: 'wallet',
+                icon: Icons.account_balance_wallet_rounded,
+              ),
+              const SizedBox(width: 8),
+              _buildPaymentOption(
+                label: 'Online',
+                method: 'online',
+                icon: Icons.credit_card_rounded,
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+          // Confirm Ride Button
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.black,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 18),
+                padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 elevation: 0,
               ),
               onPressed: _isBooking ? null : _confirmRide,
               child: _isBooking
-                  ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
-                  : Text(
-                      'Confirm $_selectedVehicle',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'Confirm $_selectedVehicle',
+                          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                        ),
+                        if (_fareAmount > 0) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '• ৳${_fareAmount.toStringAsFixed(0)}',
+                            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: Colors.white70),
+                          ),
+                        ],
+                      ],
                     ),
             ),
           ),
@@ -1497,9 +1770,60 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildPaymentOption({
+    required String label,
+    required String method,
+    required IconData icon,
+  }) {
+    final bool isSelected = _paymentMethod == method;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _paymentMethod = method),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.black : Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected ? Colors.black : Colors.grey.shade300,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 17,
+                color: isSelected ? Colors.white : Colors.black87,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: isSelected ? Colors.white : Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildFindingDriversPanel() {
+    final dispatch = _activeRideTracking?['dispatch'] as Map<String, dynamic>?;
+    final int attempt = dispatch?['dispatch_attempt'] is int 
+        ? dispatch!['dispatch_attempt'] 
+        : (int.tryParse(dispatch?['dispatch_attempt']?.toString() ?? '1') ?? 1);
+    final int secondsRem = dispatch?['seconds_remaining'] is int 
+        ? dispatch!['seconds_remaining'] 
+        : (int.tryParse(dispatch?['seconds_remaining']?.toString() ?? '15') ?? 15);
+    final String radiusText = dispatch?['search_radius_text']?.toString() ?? '৫ কিমি এলাকা';
+
     return Container(
-      padding: const EdgeInsets.all(32.0),
+      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
@@ -1516,38 +1840,38 @@ class _HomeScreenState extends State<HomeScreen> {
               backgroundColor: Color(0xFFE8F5E9),
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 20),
           Container(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: const Color(0xFFE8F5E9),
               shape: BoxShape.circle,
               border: Border.all(color: const Color(0xFF81C784), width: 2.5),
             ),
             child: const Icon(
-              Icons.check_circle_rounded,
-              size: 68,
+              Icons.radar_rounded,
+              size: 52,
               color: Color(0xFF2E7D32),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
           const Text(
-            'Successful',
+            'রিকোয়েস্ট সক্রিয় হয়েছে',
             style: TextStyle(
-              fontSize: 26,
+              fontSize: 22,
               fontWeight: FontWeight.w900,
               color: Color(0xFF2E7D32),
               letterSpacing: -0.5,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
-            'কাছের ৩ জন উপযুক্ত চালকের কাছে রিকোয়েস্ট পাঠানো হয়েছে ($_selectedVehicle)',
+            '৫ কিমি এলাকায় নিকটস্থ উপযুক্ত চালককে পাঠানো হয়েছে ($_selectedVehicle)',
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.black87,
               fontWeight: FontWeight.w700,
-              fontSize: 15,
+              fontSize: 14,
             ),
           ),
           const SizedBox(height: 10),
@@ -1588,37 +1912,108 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          // 5 KM Search Radius & Sequential Badges
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.teal.shade50,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.teal.shade200),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.radar_rounded, size: 14, color: Colors.teal.shade800),
+                    const SizedBox(width: 4),
+                    Text(
+                      'সার্চ পরিধি: $radiusText',
+                      style: TextStyle(
+                        color: Colors.teal.shade900,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.indigo.shade50,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.indigo.shade200),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.person_pin_circle_rounded, size: 14, color: Colors.indigo.shade800),
+                    const SizedBox(width: 4),
+                    Text(
+                      'ধারাবাহিক ডিসপ্যাচ: ১ জন করে • চেষ্টা #$attempt',
+                      style: TextStyle(
+                        color: Colors.indigo.shade900,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 10),
+          // Cascade Note
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
-              borderRadius: BorderRadius.circular(20),
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.orange.shade200),
             ),
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.radar_rounded, size: 16, color: Colors.blueGrey.shade700),
+                Icon(Icons.alt_route_rounded, color: Colors.deepOrange.shade800, size: 16),
                 const SizedBox(width: 6),
-                Text(
-                  'সার্চ পরিধি: ৫ ➔ ৭ ➔ ১০ ➔ ১৫ কিমি • ১৫ সেকেন্ড সময়',
-                  style: TextStyle(
-                    color: Colors.blueGrey.shade800,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
+                Expanded(
+                  child: Text(
+                    'চালক ডিক্লাইন বা সময় শেষ হলে স্বয়ংক্রিয়ভাবে পরবর্তী নিকটস্থ চালকের কাছে পাঠানো হবে।',
+                    style: TextStyle(
+                      color: Colors.deepOrange.shade900,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 10),
-          const Text(
-            'চালকের সাড়া পাওয়ার অপেক্ষা করা হচ্ছে...',
-            style: TextStyle(
-              color: Colors.black54,
-              fontWeight: FontWeight.w500,
-              fontSize: 13,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2E7D32)),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                secondsRem > 0 
+                    ? 'নিকটস্থ চালকের উত্তরের অপেক্ষা করা হচ্ছে ($secondsRem সেকেন্ড)...'
+                    : 'চালকের উত্তরের অপেক্ষা করা হচ্ছে...',
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1816,6 +2211,29 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
+                if (status == 'arrived') ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3E5F5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFCE93D8)),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.hourglass_top_rounded, color: Color(0xFF8E2DE2), size: 18),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'ড্রাইভার পৌঁছে গেছেন • আপনার জন্য অপেক্ষা করছেন (প্রথম ৫ মিনিট ফ্রি সময়)। যাত্রা শুরু করতে OTP কোডটি চালককে প্রদান করুন।',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF4A148C)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
 
                 // 2. Driver Profile & Vehicle Details Card
@@ -2099,14 +2517,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         onPressed: () {
                           if (_currentRideId != null) {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ChatScreen(
-                                  rideId: _currentRideId!,
-                                  otherPersonName: driverName,
-                                ),
-                              ),
+                            context.push(
+                              '/chat/$_currentRideId',
+                              extra: driverName,
                             );
                           }
                         },

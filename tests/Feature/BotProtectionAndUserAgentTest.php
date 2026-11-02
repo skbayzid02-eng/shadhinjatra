@@ -177,5 +177,43 @@ class BotProtectionAndUserAgentTest extends TestCase
                 'display_name' => 'Dhaka, Bangladesh',
             ]);
     }
+
+    /**
+     * Test map controller supports modern Chrome/Safari browser User-Agents for OpenStreetMap.
+     */
+    public function test_map_controller_supports_browser_user_agents_for_osm(): void
+    {
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $chromeAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 (ShadhinJatraApp/1.0)';
+        Setting::set('osm_user_agent', $chromeAgent, 'security');
+
+        Http::fake([
+            'https://nominatim.openstreetmap.org/*' => function ($request) use ($chromeAgent) {
+                $this->assertSame($chromeAgent, $request->header('User-Agent')[0]);
+                $this->assertSame('application/json', $request->header('Accept')[0]);
+                $this->assertSame('https://shadhinjatra.com/', $request->header('Referer')[0]);
+
+                return Http::response([
+                    [
+                        'lat' => '22.3569',
+                        'lon' => '91.7832',
+                        'display_name' => 'Chittagong, Bangladesh',
+                    ]
+                ], 200);
+            },
+        ]);
+
+        $response = $this->getJson('/api/map/geocode?query=Chittagong');
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'lat' => '22.3569',
+                'lon' => '91.7832',
+                'display_name' => 'Chittagong, Bangladesh',
+            ]);
+    }
 }
 

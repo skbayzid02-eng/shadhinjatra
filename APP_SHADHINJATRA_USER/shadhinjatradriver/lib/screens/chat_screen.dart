@@ -222,9 +222,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const Text(
-              'সক্রিয় রাইড চ্যাট • অনলাইন',
-              style: TextStyle(fontSize: 11, color: Colors.white70),
+            Text(
+              'সক্রিয় রাইড চ্যাট • ${_realtimeMode == 'websocket' ? 'লাইভ' : 'অনলাইন'}',
+              style: const TextStyle(fontSize: 11, color: Colors.white70),
             ),
           ],
         ),

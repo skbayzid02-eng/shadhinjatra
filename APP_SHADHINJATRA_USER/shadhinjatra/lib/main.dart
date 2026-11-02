@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:get/get.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:shadhinjatra/controllers/app_state_controller.dart';
 import 'package:shadhinjatra/controllers/language_controller.dart';
 import 'package:shadhinjatra/controllers/theme_controller.dart';
-import 'package:shadhinjatra/screens/live_suspend_screen.dart';
-import 'package:shadhinjatra/screens/login_screen.dart';
-import 'package:shadhinjatra/screens/main_navigation.dart';
+import 'package:shadhinjatra/routes/app_router.dart';
 import 'package:shadhinjatra/services/auth_service.dart';
 import 'package:shadhinjatra/services/firestore_domain_service.dart';
 
@@ -65,31 +64,39 @@ void main() async {
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   final bool isLoggedIn;
 
   const MyApp({super.key, required this.isLoggedIn});
 
   @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  late final GoRouter _router;
+
+  @override
+  void initState() {
+    super.initState();
+    _router = AppRouter.createRouter(isLoggedIn: widget.isLoggedIn);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final themeController = ThemeController.to;
-    final appStateController = AppStateController.to;
 
     return Obx(
-      () => GetMaterialApp(
+      () => MaterialApp.router(
         title: 'Shadhin Jatra User',
         debugShowCheckedModeBanner: false,
+        routerConfig: _router,
         localizationsDelegates: context.localizationDelegates,
         supportedLocales: context.supportedLocales,
         locale: context.locale,
         theme: ThemeController.lightTheme,
         darkTheme: ThemeController.darkTheme,
         themeMode: themeController.themeMode.value,
-        home: isLoggedIn
-            ? (appStateController.isSuspended.value
-                ? const LiveSuspendScreen()
-                : const MainNavigation())
-            : const LoginScreen(),
       ),
     );
   }

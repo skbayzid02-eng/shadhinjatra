@@ -148,6 +148,16 @@ class DriverNotificationController extends Controller
             ], 400);
         }
 
+        // Mandatory Subscription Enforcement: Cannot accept ride without active subscription
+        if (!$user->hasActiveSubscription()) {
+            return response()->json([
+                'success' => false,
+                'requires_subscription' => true,
+                'subscription_status' => $user->subscription_status ?? 'expired',
+                'message' => 'সাবস্ক্রিপশন ছাড়া নতুন রাইড গ্রহণ করা যাবে না। অনুগ্রহ করে সাবস্ক্রিপশন রিনিউ করুন।',
+            ], 403);
+        }
+
         // 1. Confirm and accept the ride
         $ride->status = 'ongoing';
         $ride->driver_id = $user->id;

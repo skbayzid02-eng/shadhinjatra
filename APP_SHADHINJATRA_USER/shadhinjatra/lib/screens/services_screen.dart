@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shadhinjatra/services/auth_service.dart';
 
 class ServicesScreen extends StatefulWidget {
@@ -180,7 +181,8 @@ class _ServicesScreenState extends State<ServicesScreen> with SingleTickerProvid
   Widget _buildServiceCard(dynamic service, List<Color> gradient) {
     return GestureDetector(
       onTap: () {
-        // Animation or navigation could go here
+        final vehicleName = service['name']?.toString() ?? 'Car';
+        context.go('/?vehicle=${Uri.encodeComponent(vehicleName)}');
       },
       child: Container(
         decoration: BoxDecoration(

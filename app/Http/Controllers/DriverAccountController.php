@@ -153,24 +153,6 @@ class DriverAccountController extends Controller
      */
     public function subscription(Request $request): JsonResponse
     {
-        $user = $request->user();
-
-        $plan = $user->subscription_status ?: 'Premium Weekly';
-        $expiresAt = $user->subscription_expires_at ? $user->subscription_expires_at->format('Y-m-d') : date('Y-m-d', strtotime('+7 days'));
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'current_plan' => $plan,
-                'status' => $user->subscription_status ? 'Active' : 'Inactive',
-                'expires_at' => $expiresAt,
-                'price' => '৳500',
-                'history' => [
-                    ['date' => date('Y-m-d', strtotime('-7 days')), 'plan' => $plan, 'amount' => '৳500', 'status' => 'Paid'],
-                    ['date' => date('Y-m-d', strtotime('-14 days')), 'plan' => $plan, 'amount' => '৳500', 'status' => 'Paid'],
-                ],
-            ],
-            'message' => 'Subscription info fetched successfully'
-        ]);
+        return app(\App\Http\Controllers\SubscriptionController::class)->status($request);
     }
 }

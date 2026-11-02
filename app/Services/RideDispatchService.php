@@ -13,55 +13,59 @@ use Illuminate\Support\Facades\Log;
 class RideDispatchService
 {
     /**
-     * Dispatch window duration for each batch of drivers in seconds.
-     * Drivers have 15 seconds to accept before the system cascades to the next batch.
+     * Search radius strictly set to 5.0 KM as requested.
+     */
+    public const DEFAULT_SEARCH_RADIUS = 5.0;
+
+    /**
+     * Dispatch countdown timer for each driver in seconds.
+     * Drivers have 15 seconds to accept before the system cascades to the next driver.
      */
     public const DISPATCH_TIMEOUT_SECONDS = 15;
 
     /**
-     * Number of closest suitable drivers dispatched simultaneously in each round.
+     * Sequential Driver Dispatch: Exactly 1 driver is dispatched at a time.
+     * "একজন রাইড একজন ড্রাইভারকেই বরাদ্দ হবে"
      */
-    public const DISPATCH_BATCH_SIZE = 3;
+    public const DISPATCH_BATCH_SIZE = 1;
 
     /**
-     * Progressive search radius tiers in kilometers (Tier 1: 5km, Tier 2: 7km, Tier 3: 10km, Tier 4: 15km).
+     * Progressive search radius tiers in kilometers (Initial tier is 5.0 KM).
      */
-    public const DEFAULT_RADIUS_TIERS = [5.0, 7.0, 10.0, 15.0];
+    public const DEFAULT_RADIUS_TIERS = [5.0];
 
     /**
-     * Get search radius in kilometers based on the dispatch attempt round.
+     * Get search radius in kilometers.
      *
      * @param int $attempt
      * @return float
      */
     public function getRadiusForAttempt(int $attempt): float
     {
-        $tiers = config('shadhinjatra.dispatch_radius_tiers', self::DEFAULT_RADIUS_TIERS);
-        $index = max(0, $attempt - 1);
-        if ($index >= count($tiers)) {
-            return (float) end($tiers);
-        }
-        return (float) $tiers[$index];
+        return self::DEFAULT_SEARCH_RADIUS;
     }
 
     /**
-     * Rank all eligible nearby drivers for a ride within a given radius based on:
-     * 1. Distance from driver's location to pickup location (50% weight)
-     * 2. Driver Rating (30% weight)
-     * 3. Driver Experience & completed rides (20% weight)
+     * Rank all eligible nearby drivers within a 5.0 KM radius:
+     * - Nearest Eligible Driver First (Strict distance sort ascending)
+     * - Secondary sort by Rating (descending)
+     * - Tertiary sort by Experience & completed rides (descending)
      *
-     * Strict Qualification:
-     * - Online (is_online = true)
-     * - Verified (is_verified = true, verification_status = 'verified', documents_verified = true)
-     * - Active Subscription (subscription_status = 'active' and not expired)
-     * - Matching vehicle type
-     * - Not passenger, not in ongoing ride, not in rejection list
+     * Strict Driver Eligibility:
+     * 1. Online: is_online = true and active in last 90 seconds
+     * 2. Verified: is_verified = true, verification_status = 'verified', documents_verified = true
+     * 3. Active Subscription: subscription_status = 'active' and not expired
+     * 4. Matching vehicle category
+     * 5. No ongoing active ride (accepted, ongoing, started, arrived)
+     * 6. Not the passenger themselves
+     * 7. Not in rejection list for this ride
+     * 8. Within 5.0 KM radius
      *
      * @param Ride $ride
      * @param float $radiusKm
      * @return Collection
      */
-    public function rankNearbyDrivers(Ride $ride, float $radiusKm = 5.0): Collection
+    public function rankNearbyDrivers(Ride $ride, float $radiusKm = self::DEFAULT_SEARCH_RADIUS): Collection
     {
         $pickupLat = (float) ($ride->pickup_lat ?? 23.8103);
         $pickupLon = (float) ($ride->pickup_lon ?? 90.4125);
@@ -106,19 +110,19 @@ class RideDispatchService
 
             $distanceKm = $this->calculateDistance($driverLat, $driverLon, $pickupLat, $pickupLon);
 
-            // Filter out drivers further than radiusKm
+            // Filter out drivers further than 5.0 KM
             if ($distanceKm > $radiusKm) {
                 continue;
             }
 
-            // 1. Distance Score (0 - 100): Closest gets highest
+            // Distance Score (0 - 100): Closest gets highest
             $distanceScore = max(0, 100 - ($distanceKm * 10));
 
-            // 2. Rating Score (0 - 100): 5.0 = 100 points
+            // Rating Score (0 - 100): 5.0 = 100 points
             $rating = (float) ($driver->rating ?? 5.0);
             $ratingScore = min(100, max(0, ($rating / 5.0) * 100));
 
-            // 3. Experience Score (0 - 100): Completed rides count + verification bonus
+            // Experience Score (0 - 100): Completed rides count + verification bonus
             $completedRidesCount = Ride::where('driver_id', $driver->id)
                 ->where('status', 'completed')
                 ->count();
@@ -140,21 +144,28 @@ class RideDispatchService
             ]);
         }
 
-        // Sort descending by total score, secondary sort ascending by distance
+        // Nearest Eligible Driver First:
+        // Primary sort: Ascending distance (nearest first!)
+        // Secondary sort: Descending rating
+        // Tertiary sort: Descending experience/completed rides
         return $rankedList->sort(function ($a, $b) {
-            if ($b['total_score'] === $a['total_score']) {
+            if ($a['distance_km'] != $b['distance_km']) {
                 return $a['distance_km'] <=> $b['distance_km'];
             }
-            return $b['total_score'] <=> $a['total_score'];
+            if ($b['rating'] != $a['rating']) {
+                return $b['rating'] <=> $a['rating'];
+            }
+            return $b['completed_rides'] <=> $a['completed_rides'];
         })->values();
     }
 
     /**
-     * Dispatch the ride simultaneously to the top 3 closest qualified drivers.
-     * Automatically expands search radius (5km -> 7km -> 10km) if earlier tiers have no drivers.
+     * Sequential Driver Dispatch:
+     * Dispatches sequentially to the single nearest eligible driver within 5.0 KM.
+     * "একজন রাইড একজন ড্রাইভারকেই বরাদ্দ হবে"
      *
      * @param Ride $ride
-     * @return Collection Dispatched drivers
+     * @return Collection Dispatched driver (batch of 1)
      */
     public function dispatchToNextBatch(Ride $ride): Collection
     {
@@ -163,7 +174,7 @@ class RideDispatchService
             return collect();
         }
 
-        // Record any timeouts from previous batch if window expired
+        // Record any timeouts from previous driver if window expired
         $prevDispatchedIds = $ride->dispatched_driver_ids ?? ($ride->dispatched_driver_id ? [$ride->dispatched_driver_id] : []);
         if (!empty($prevDispatchedIds) && $ride->dispatch_expires_at && Carbon::parse($ride->dispatch_expires_at)->isPast()) {
             foreach ($prevDispatchedIds as $oldId) {
@@ -177,90 +188,76 @@ class RideDispatchService
         }
 
         $nextAttempt = ($ride->dispatch_attempt ?? 0) + 1;
-        $currentRadius = $this->getRadiusForAttempt($nextAttempt);
+        $currentRadius = self::DEFAULT_SEARCH_RADIUS;
 
+        // Rank eligible candidates within 5.0 KM search radius (Nearest First)
         $rankedQueue = $this->rankNearbyDrivers($ride, $currentRadius);
 
-        // If no qualified drivers found in current radius, dynamically check expanded tiers
         if ($rankedQueue->isEmpty()) {
-            $tiers = config('shadhinjatra.dispatch_radius_tiers', self::DEFAULT_RADIUS_TIERS);
-            foreach ($tiers as $expandedRadius) {
-                if ($expandedRadius > $currentRadius) {
-                    $rankedQueue = $this->rankNearbyDrivers($ride, $expandedRadius);
-                    if ($rankedQueue->isNotEmpty()) {
-                        $currentRadius = $expandedRadius;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if ($rankedQueue->isEmpty()) {
-            // No available drivers in the area across all tiers
+            // No available eligible drivers found within 5.0 KM
             $ride->status = 'no_drivers_found';
             $ride->dispatched_driver_id = null;
-            $ride->dispatched_driver_ids = [];
+            $ride->dispatched_driver_ids = null;
             $ride->dispatch_expires_at = null;
+            $ride->search_radius_km = $currentRadius;
             $ride->save();
             return collect();
         }
 
-        // Select top 3 closest suitable drivers
+        // Sequential Driver Dispatch: Select the single nearest eligible driver (Batch of 1)
         $selectedBatch = $rankedQueue->take(self::DISPATCH_BATCH_SIZE);
-        $driverIds = $selectedBatch->pluck('driver.id')->values()->toArray();
+        $candidate = $selectedBatch->first();
+        /** @var User $driver */
+        $driver = $candidate['driver'];
 
-        // Assign batch to ride with 15-second acceptance countdown
-        $ride->dispatched_driver_ids = $driverIds;
-        $ride->dispatched_driver_id = $driverIds[0] ?? null; // Backward compatibility
+        // Assign strictly to this single driver with 15-second acceptance countdown
+        $ride->dispatched_driver_id = $driver->id;
+        $ride->dispatched_driver_ids = [$driver->id];
         $ride->dispatch_expires_at = now()->addSeconds(self::DISPATCH_TIMEOUT_SECONDS);
         $ride->dispatch_attempt = $nextAttempt;
         $ride->search_radius_km = $currentRadius;
         $ride->save();
 
-        // Send Push Notification (FCM) simultaneously to all 3 drivers
-        foreach ($selectedBatch as $candidate) {
-            /** @var User $driver */
-            $driver = $candidate['driver'];
-
-            // 1. Create in-app Notification in database
-            Notification::create([
-                'user_id' => $driver->id,
+        // 1. Create In-App Notification in database for this driver only
+        Notification::create([
+            'user_id' => $driver->id,
+            'ride_id' => $ride->id,
+            'title' => 'নতুন রাইড রিকোয়েস্ট এসেছে!',
+            'message' => "পিকআপ: {$ride->pickup_location} (ভাড়া: ৳{$ride->fare_amount})। ১৫ সেকেন্ডের মধ্যে গ্রহণ করুন।",
+            'type' => 'ride_request',
+            'data' => [
                 'ride_id' => $ride->id,
-                'title' => 'নতুন রাইড রিকোয়েস্ট এসেছে!',
-                'message' => "পিকআপ: {$ride->pickup_location} (ভাড়া: ৳{$ride->fare_amount})। ১৫ সেকেন্ডের মধ্যে গ্রহণ করুন।",
-                'type' => 'ride_request',
-                'data' => [
-                    'ride_id' => $ride->id,
-                    'pickup' => $ride->pickup_location,
-                    'dropoff' => $ride->dropoff_location,
-                    'vehicle_type' => $ride->vehicle_type,
-                    'fare' => $ride->fare_amount,
-                    'distance' => $ride->distance_km ?? 0,
-                    'passenger_name' => $ride->passenger?->name ?? 'যাত্রী',
-                    'passenger_phone' => $ride->passenger?->phone ?? '',
-                    'expires_in' => self::DISPATCH_TIMEOUT_SECONDS,
-                ],
-                'is_read' => false,
-            ]);
+                'pickup' => $ride->pickup_location,
+                'dropoff' => $ride->dropoff_location,
+                'vehicle_type' => $ride->vehicle_type,
+                'fare' => $ride->fare_amount,
+                'distance' => $ride->distance_km ?? 0,
+                'passenger_name' => $ride->passenger?->name ?? 'যাত্রী',
+                'passenger_phone' => $ride->passenger?->phone ?? '',
+                'distance_to_pickup_km' => $candidate['distance_km'],
+                'search_radius_km' => $currentRadius,
+                'expires_in' => self::DISPATCH_TIMEOUT_SECONDS,
+            ],
+            'is_read' => false,
+        ]);
 
-            // 2. Send Push Notification (FCM)
-            if ($driver->fcm_token) {
-                FcmService::send(
-                    $driver->fcm_token,
-                    'নতুন রাইড রিকোয়েস্ট এসেছে!',
-                    "পিকআপ: {$ride->pickup_location} (ভাড়া: ৳{$ride->fare_amount})। ১৫ সেকেন্ডের মধ্যে গ্রহণ করুন।",
-                    [
-                        'ride_id' => (string) $ride->id,
-                        'type' => 'ride_request_dispatched',
-                        'expires_in' => (string) self::DISPATCH_TIMEOUT_SECONDS,
-                        'pickup' => (string) $ride->pickup_location,
-                        'dropoff' => (string) $ride->dropoff_location,
-                        'fare' => (string) $ride->fare_amount,
-                        'distance' => (string) ($ride->distance_km ?? 0),
-                        'radius_km' => (string) $currentRadius,
-                    ]
-                );
-            }
+        // 2. Send Push Notification (FCM) to this single driver
+        if ($driver->fcm_token) {
+            FcmService::send(
+                $driver->fcm_token,
+                'নতুন রাইড রিকোয়েস্ট এসেছে!',
+                "পিকআপ: {$ride->pickup_location} (ভাড়া: ৳{$ride->fare_amount})। ১৫ সেকেন্ডের মধ্যে গ্রহণ করুন।",
+                [
+                    'ride_id' => (string) $ride->id,
+                    'type' => 'ride_request_dispatched',
+                    'expires_in' => (string) self::DISPATCH_TIMEOUT_SECONDS,
+                    'pickup' => (string) $ride->pickup_location,
+                    'dropoff' => (string) $ride->dropoff_location,
+                    'fare' => (string) $ride->fare_amount,
+                    'distance' => (string) ($ride->distance_km ?? 0),
+                    'radius_km' => (string) $currentRadius,
+                ]
+            );
         }
 
         return $selectedBatch;
@@ -276,7 +273,9 @@ class RideDispatchService
     }
 
     /**
-     * Handle driver rejection and immediately cascade to next batch if all current drivers rejected.
+     * Handle driver rejection and immediately cascade to the next nearest eligible driver.
+     * "Decline করলে পরবর্তী ড্রাইভার"
+     * "Timeout হলে পরবর্তী ড্রাইভার"
      *
      * @param Ride $ride
      * @param User $driver
@@ -285,7 +284,7 @@ class RideDispatchService
      */
     public function handleDriverRejection(Ride $ride, User $driver, string $reason = 'rejected'): Collection
     {
-        // Record rejection in rejection table
+        // 1. Record rejection in rejection table
         DriverRideRejection::firstOrCreate([
             'driver_id' => $driver->id,
             'ride_id' => $ride->id,
@@ -293,37 +292,27 @@ class RideDispatchService
             'reason' => $reason,
         ]);
 
-        // Clean up in-app notifications for this driver regarding this ride
+        // 2. Clean up in-app notifications for this driver regarding this ride
         Notification::where('user_id', $driver->id)
             ->where('ride_id', $ride->id)
             ->delete();
 
-        // Remove this driver from current dispatched batch
-        $currentBatch = $ride->dispatched_driver_ids ?? ($ride->dispatched_driver_id ? [$ride->dispatched_driver_id] : []);
-        $remainingBatch = array_values(array_filter($currentBatch, fn($id) => $id != $driver->id));
-
-        $ride->dispatched_driver_ids = $remainingBatch;
-        $ride->dispatched_driver_id = $remainingBatch[0] ?? null;
+        // 3. Clear current dispatched driver pointer
+        $ride->dispatched_driver_ids = null;
+        $ride->dispatched_driver_id = null;
+        $ride->dispatch_expires_at = null;
         $ride->save();
 
-        // If no drivers left in this batch or window expired, cascade to next batch of 3
-        if (empty($remainingBatch) || ($ride->dispatch_expires_at && Carbon::parse($ride->dispatch_expires_at)->isPast())) {
-            $ride->dispatched_driver_ids = null;
-            $ride->dispatched_driver_id = null;
-            $ride->dispatch_expires_at = null;
-            $ride->save();
-
-            return $this->dispatchToNextBatch($ride);
-        }
-
-        return collect();
+        // 4. Immediately cascade to the next nearest eligible driver within 5.0 KM
+        return $this->dispatchToNextBatch($ride);
     }
 
     /**
-     * Check any pending rides where current batch dispatch window (15s) expired
-     * and automatically cascade to the next available batch of 3 drivers.
+     * Check any pending rides where current driver dispatch window (15s) expired
+     * and automatically cascade to the next nearest eligible driver within 5.0 KM.
+     * "Timeout হলে পরবর্তী ড্রাইভার"
      *
-     * @return int Number of rides re-dispatched
+     * @return int Number of rides cascaded
      */
     public function cascadeExpiredDispatches(): int
     {
@@ -346,6 +335,11 @@ class RideDispatchService
                 ], [
                     'reason' => 'timeout',
                 ]);
+
+                // Clean up in-app notifications
+                Notification::where('user_id', $driverId)
+                    ->where('ride_id', $ride->id)
+                    ->delete();
             }
 
             $ride->dispatched_driver_ids = null;
@@ -353,6 +347,7 @@ class RideDispatchService
             $ride->dispatch_expires_at = null;
             $ride->save();
 
+            // Cascade to next nearest eligible driver
             $this->dispatchToNextBatch($ride);
             $count++;
         }
@@ -361,29 +356,46 @@ class RideDispatchService
     }
 
     /**
-     * Compatible vehicle categories helper
+     * Universal Vehicle Category Matching:
+     * Supports all vehicle categories with identical dispatch logic:
+     * - Private Car (Car, Private Car, Sedan)
+     * - Motorcycle (Bike, Motorcycle, Scooter)
+     * - CNG / Auto (CNG, Auto, Auto Rickshaw)
+     * - Rickshaw / Easy Bike (Rickshaw, Easy Bike, Battery Rickshaw)
+     * - Microbus (Microbus, HiAce, Noah)
+     * - Cargo Vehicle (Cargo, Cargo Vehicle, Pickup, Truck)
+     * - Ambulance (Ambulance, Emergency Ambulance)
+     *
+     * @param string|null $vehicleType
+     * @return array
      */
     public function getCompatibleVehicleTypes(?string $vehicleType): array
     {
         if (!$vehicleType) {
-            return ['Car', 'Private Car', 'Bike', 'CNG', 'Rickshaw', 'Microbus'];
+            return ['Car', 'Private Car', 'Bike', 'CNG', 'Rickshaw', 'Microbus', 'Cargo Vehicle'];
         }
 
-        $type = strtolower($vehicleType);
-        if (str_contains($type, 'car') || str_contains($type, 'private')) {
+        $type = strtolower(trim($vehicleType));
+        if (str_contains($type, 'car') || str_contains($type, 'private') || str_contains($type, 'sedan')) {
             return ['Car', 'Private Car', 'Sedan'];
         }
-        if (str_contains($type, 'bike') || str_contains($type, 'motor')) {
+        if (str_contains($type, 'bike') || str_contains($type, 'motor') || str_contains($type, 'scooter')) {
             return ['Bike', 'Motorcycle', 'Scooter'];
         }
         if (str_contains($type, 'cng') || str_contains($type, 'auto')) {
             return ['CNG', 'Auto', 'Auto Rickshaw'];
         }
         if (str_contains($type, 'rickshaw') || str_contains($type, 'easy')) {
-            return ['Rickshaw', 'Easy Bike'];
+            return ['Rickshaw', 'Easy Bike', 'Battery Rickshaw'];
         }
-        if (str_contains($type, 'micro') || str_contains($type, 'van')) {
+        if (str_contains($type, 'micro') || str_contains($type, 'van') || str_contains($type, 'hiace') || str_contains($type, 'noah')) {
             return ['Microbus', 'HiAce', 'Noah'];
+        }
+        if (str_contains($type, 'cargo') || str_contains($type, 'pickup') || str_contains($type, 'truck')) {
+            return ['Cargo', 'Cargo Vehicle', 'Pickup', 'Truck'];
+        }
+        if (str_contains($type, 'ambulance') || str_contains($type, 'emergency')) {
+            return ['Ambulance', 'Emergency Ambulance'];
         }
 
         return [$vehicleType];

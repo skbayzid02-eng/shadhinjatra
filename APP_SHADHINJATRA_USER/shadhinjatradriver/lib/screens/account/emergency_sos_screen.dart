@@ -226,6 +226,13 @@ class _EmergencySosScreenState extends State<EmergencySosScreen> {
                   _buildHotlineCard('ফায়ার সার্ভিস ও সিভিল ডিফেন্স', fireNumber, Icons.fire_truck, Colors.deepOrange),
                   _buildHotlineCard('নারী ও শিশু হেল্পলাইন', womenHelpline, Icons.support_agent, Colors.purple),
                   _buildHotlineCard('স্বাধীন যাত্রা চালক সহায়তা', supportPhone, Icons.headset_mic, Colors.teal),
+                  if (_contactData != null && _contactData!['phone'] != null)
+                    _buildHotlineCard(
+                      'ব্যক্তিগত জরুরি যোগাযোগ (${_contactData!['name'] ?? 'পরিবার'})',
+                      _contactData!['phone'].toString(),
+                      Icons.person_pin_circle_rounded,
+                      Colors.green,
+                    ),
                 ],
               ),
             ),

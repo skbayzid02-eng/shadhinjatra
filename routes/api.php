@@ -38,9 +38,27 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/account/emergency-contact', [\App\Http\Controllers\AccountController::class, 'updateEmergencyContact']);
     Route::put('/account/emergency-contact', [\App\Http\Controllers\AccountController::class, 'updateEmergencyContact']);
     Route::delete('/account', [\App\Http\Controllers\AccountController::class, 'deleteAccount']);
+
+    // User Notification Endpoints
     Route::get('/account/notifications', [\App\Http\Controllers\AccountController::class, 'notifications']);
+    Route::get('/user/notifications', [\App\Http\Controllers\AccountController::class, 'notifications']);
+    Route::get('/account/notifications/unread-count', [\App\Http\Controllers\AccountController::class, 'unreadNotificationsCount']);
+    Route::get('/user/notifications/unread-count', [\App\Http\Controllers\AccountController::class, 'unreadNotificationsCount']);
     Route::post('/account/notifications/mark-read', [\App\Http\Controllers\AccountController::class, 'markNotificationsRead']);
+    Route::post('/account/notifications/mark-all-read', [\App\Http\Controllers\AccountController::class, 'markNotificationsRead']);
+    Route::post('/user/notifications/mark-all-read', [\App\Http\Controllers\AccountController::class, 'markNotificationsRead']);
+    Route::post('/account/notifications/bulk-delete', [\App\Http\Controllers\AccountController::class, 'bulkDeleteNotifications']);
+    Route::post('/user/notifications/bulk-delete', [\App\Http\Controllers\AccountController::class, 'bulkDeleteNotifications']);
+    Route::delete('/account/notifications/delete-all', [\App\Http\Controllers\AccountController::class, 'deleteAllNotifications']);
+    Route::delete('/user/notifications/delete-all', [\App\Http\Controllers\AccountController::class, 'deleteAllNotifications']);
+    Route::post('/account/notifications/restore', [\App\Http\Controllers\AccountController::class, 'restoreNotifications']);
+    Route::post('/user/notifications/restore', [\App\Http\Controllers\AccountController::class, 'restoreNotifications']);
     Route::post('/account/notifications/{id}/read', [\App\Http\Controllers\AccountController::class, 'markSingleNotificationRead']);
+    Route::post('/user/notifications/{id}/read', [\App\Http\Controllers\AccountController::class, 'markSingleNotificationRead']);
+    Route::post('/account/notifications/{id}/unread', [\App\Http\Controllers\AccountController::class, 'markSingleNotificationUnread']);
+    Route::post('/user/notifications/{id}/unread', [\App\Http\Controllers\AccountController::class, 'markSingleNotificationUnread']);
+    Route::delete('/account/notifications/{id}', [\App\Http\Controllers\AccountController::class, 'destroyNotification']);
+    Route::delete('/user/notifications/{id}', [\App\Http\Controllers\AccountController::class, 'destroyNotification']);
     Route::get('/about', [\App\Http\Controllers\AccountController::class, 'about']);
     Route::get('/support', [\App\Http\Controllers\SupportController::class, 'index']);
     Route::get('/support/contact', [\App\Http\Controllers\SupportController::class, 'contact']);
@@ -64,6 +82,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/rides/current', [\App\Http\Controllers\Api\RideController::class, 'current']);
     Route::get('/rides/current/tracking', [\App\Http\Controllers\Api\RideController::class, 'tracking']);
     Route::get('/rides/{id}/tracking', [\App\Http\Controllers\Api\RideController::class, 'tracking']);
+    Route::get('/rides/current/dispatch-status', [\App\Http\Controllers\Api\RideController::class, 'dispatchStatus']);
+    Route::get('/rides/{id}/dispatch-status', [\App\Http\Controllers\Api\RideController::class, 'dispatchStatus']);
     Route::post('/rides/{id}/status', [\App\Http\Controllers\Api\RideController::class, 'updateRideStatus']);
     Route::post('/rides/{id}/cancel', [\App\Http\Controllers\Api\RideController::class, 'cancel']);
     Route::get('/rides/{id}/cancellation-preview', [\App\Http\Controllers\Api\RideController::class, 'cancellationPreview']);
@@ -74,16 +94,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/safety/sos', [\App\Http\Controllers\Api\RideController::class, 'updateSosInfo']);
     Route::post('/rides/{id}/simulate', [\App\Http\Controllers\Api\RideController::class, 'simulateDriver']);
     Route::post('/rides/{id}/rate', [\App\Http\Controllers\Api\RideController::class, 'rateRide']);
-    Route::get('/map/nearby-drivers', [\App\Http\Controllers\Api\RideController::class, 'nearbyDrivers']);
-    Route::get('/promotions', [\App\Http\Controllers\Api\PromotionController::class, 'index']);
-    Route::post('/promotions/apply', [\App\Http\Controllers\Api\PromotionController::class, 'apply']);
-    Route::post('/promotions/send', [\App\Http\Controllers\Api\PromotionController::class, 'send']);
-    Route::post('/promotions', [\App\Http\Controllers\Api\PromotionController::class, 'store']);
-    Route::put('/promotions/{id}', [\App\Http\Controllers\Api\PromotionController::class, 'update']);
-    Route::delete('/promotions/{id}', [\App\Http\Controllers\Api\PromotionController::class, 'destroy']);
-    Route::get('/commission', [\App\Http\Controllers\Api\PromotionController::class, 'commission']);
-    Route::post('/commission', [\App\Http\Controllers\Api\PromotionController::class, 'updateCommission']);
-    
     // Universal Chat Endpoints for a specific ride
     Route::get('/rides/{id}/chat', [\App\Http\Controllers\Api\RideChatController::class, 'index']);
     Route::get('/rides/{id}/chat/new-messages', [\App\Http\Controllers\Api\RideChatController::class, 'fetchNewMessages']);
@@ -92,13 +102,29 @@ Route::middleware('auth:sanctum')->group(function () {
     // Driver API Routes
     Route::get('/driver/home', [\App\Http\Controllers\DriverHomeController::class, 'index']);
     Route::get('/driver/nearby-requests', [\App\Http\Controllers\DriverHomeController::class, 'nearbyRequests']);
+    Route::get('/driver/nearby-drivers', [\App\Http\Controllers\DriverHomeController::class, 'nearbyDrivers']);
     Route::post('/driver/status', [\App\Http\Controllers\DriverHomeController::class, 'updateStatus']);
     Route::post('/driver/heartbeat', [\App\Http\Controllers\DriverHomeController::class, 'heartbeat']);
     Route::post('/driver/location', [\App\Http\Controllers\DriverHomeController::class, 'updateLocation']);
+    Route::get('/driver/ride/{id}/request-preview', [\App\Http\Controllers\DriverHomeController::class, 'rideRequestPreview']);
     Route::post('/driver/ride/{id}/accept', [\App\Http\Controllers\DriverHomeController::class, 'acceptRide']);
     Route::post('/driver/ride/{id}/reject', [\App\Http\Controllers\DriverHomeController::class, 'rejectRide']);
+    Route::post('/driver/ride/{id}/decline', [\App\Http\Controllers\DriverHomeController::class, 'rejectRide']);
     Route::post('/driver/ride/{id}/timeout', [\App\Http\Controllers\DriverHomeController::class, 'timeoutRide']);
     Route::get('/driver/ride/{id}/status', [\App\Http\Controllers\DriverHomeController::class, 'checkRideStatus']);
+    Route::get('/driver/ride/{id}/active-details', [\App\Http\Controllers\DriverHomeController::class, 'activeRideDetails']);
+    Route::post('/driver/ride/{id}/arrived', [\App\Http\Controllers\DriverHomeController::class, 'markArrived']);
+    Route::post('/driver/ride/{id}/verify-otp-start', [\App\Http\Controllers\DriverHomeController::class, 'verifyOtpAndStartTrip']);
+    Route::post('/driver/ride/{id}/end', [\App\Http\Controllers\DriverHomeController::class, 'endTrip']);
+    Route::get('/driver/ride/{id}/completed-summary', [\App\Http\Controllers\DriverHomeController::class, 'completedSummary']);
+    Route::post('/driver/ride/{id}/rate-passenger', [\App\Http\Controllers\DriverHomeController::class, 'ratePassenger']);
+    Route::post('/driver/ride/{id}/skip-rating', [\App\Http\Controllers\DriverHomeController::class, 'skipRating']);
+    
+    // Universal Ride Request Action Endpoints
+    Route::get('/rides/{id}/request-preview', [\App\Http\Controllers\DriverHomeController::class, 'rideRequestPreview']);
+    Route::post('/rides/{id}/accept', [\App\Http\Controllers\DriverHomeController::class, 'acceptRide']);
+    Route::post('/rides/{id}/reject', [\App\Http\Controllers\DriverHomeController::class, 'rejectRide']);
+    Route::post('/rides/{id}/decline', [\App\Http\Controllers\DriverHomeController::class, 'rejectRide']);
     
     // Driver Notification Endpoints
     Route::get('/driver/notifications', [\App\Http\Controllers\DriverNotificationController::class, 'index']);
@@ -110,7 +136,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/driver/notifications/mark-read', [\App\Http\Controllers\DriverNotificationController::class, 'markAllAsRead']);
     Route::delete('/driver/notifications/{id}', [\App\Http\Controllers\DriverNotificationController::class, 'destroy']);
     
-    // Driver Navigation Endpoints
+    // Earnings & Payouts Endpoints
+    Route::get('/earnings', [\App\Http\Controllers\DriverDashboardController::class, 'earnings']);
+    Route::get('/account/earnings', [\App\Http\Controllers\DriverDashboardController::class, 'earnings']);
     Route::get('/driver/earnings', [\App\Http\Controllers\DriverDashboardController::class, 'earnings']);
     Route::post('/driver/withdraw', [\App\Http\Controllers\DriverDashboardController::class, 'requestWithdrawal']);
     Route::get('/driver/withdrawals', [\App\Http\Controllers\DriverDashboardController::class, 'withdrawals']);
@@ -124,6 +152,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/driver/account/documents', [\App\Http\Controllers\DriverAccountController::class, 'documents']);
     Route::get('/driver/account/subscription', [\App\Http\Controllers\DriverAccountController::class, 'subscription']);
     
+    // Mandatory Driver Monthly Subscription Endpoints
+    Route::get('/subscription/status', [\App\Http\Controllers\SubscriptionController::class, 'status']);
+    Route::get('/account/subscription', [\App\Http\Controllers\SubscriptionController::class, 'status']);
+    Route::post('/subscription/subscribe', [\App\Http\Controllers\SubscriptionController::class, 'subscribe']);
+    Route::post('/subscription/renew', [\App\Http\Controllers\SubscriptionController::class, 'subscribe']);
+    Route::get('/subscription/history', [\App\Http\Controllers\SubscriptionController::class, 'history']);
+    Route::put('/admin/subscription/price', [\App\Http\Controllers\SubscriptionController::class, 'updatePrice']);
+    Route::post('/admin/subscription/price', [\App\Http\Controllers\SubscriptionController::class, 'updatePrice']);
+    
     // Driver Chat Endpoints (Dynamic Switch for Reverb / Shared Hosting Delta-Polling)
     Route::get('/driver/chats', [\App\Http\Controllers\DriverChatController::class, 'index']);
     Route::get('/driver/chats/realtime-config', [\App\Http\Controllers\DriverChatController::class, 'realtimeConfig']);
@@ -132,14 +169,27 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/driver/chats/{id}/new-messages', [\App\Http\Controllers\DriverChatController::class, 'fetchNewMessages']);
     Route::post('/driver/chats/{id}/send', [\App\Http\Controllers\DriverChatController::class, 'sendMessage']);
     
-    Route::get('/map/geocode', [\App\Http\Controllers\MapController::class, 'geocode']);
-    Route::get('/map/route', [\App\Http\Controllers\MapController::class, 'route']);
+    // Promotions & Commission
+    Route::get('/promotions', [\App\Http\Controllers\Api\PromotionController::class, 'index']);
+    Route::post('/promotions/apply', [\App\Http\Controllers\Api\PromotionController::class, 'apply']);
+    Route::post('/promotions/send', [\App\Http\Controllers\Api\PromotionController::class, 'send']);
+    Route::post('/promotions', [\App\Http\Controllers\Api\PromotionController::class, 'store']);
+    Route::put('/promotions/{id}', [\App\Http\Controllers\Api\PromotionController::class, 'update']);
+    Route::delete('/promotions/{id}', [\App\Http\Controllers\Api\PromotionController::class, 'destroy']);
+    Route::get('/commission', [\App\Http\Controllers\Api\PromotionController::class, 'commission']);
+    Route::post('/commission', [\App\Http\Controllers\Api\PromotionController::class, 'updateCommission']);
 });
 
-// Dynamic Vehicle Categories & Fare Rates API (Database Synced)
+// Public Map & Geocoding Utilities (Supports Guest & Authenticated Users)
+Route::get('/map/geocode', [\App\Http\Controllers\MapController::class, 'geocode']);
+Route::get('/map/route', [\App\Http\Controllers\MapController::class, 'route']);
+Route::get('/map/nearby-drivers', [\App\Http\Controllers\Api\RideController::class, 'nearbyDrivers']);
+
+// Dynamic Vehicle Categories & Real-time Fare Calculation API
 Route::get('/vehicles', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'index']);
 Route::get('/vehicles/{id}', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'show']);
 Route::post('/vehicles', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'store']);
 Route::put('/vehicles/{id}', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'update']);
 Route::post('/vehicles/{id}', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'update']);
 Route::delete('/vehicles/{id}', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'destroy']);
+Route::match(['get', 'post'], '/fare/calculate', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'calculateFares']);

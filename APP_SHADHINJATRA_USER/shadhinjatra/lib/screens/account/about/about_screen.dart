@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shadhinjatra/services/auth_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -143,10 +144,12 @@ class _AboutScreenState extends State<AboutScreen> {
                     ListTile(
                       tileColor: Colors.white,
                       title: const Text('Privacy Policy'),
-                      trailing: const Icon(Icons.open_in_new, size: 20),
+                      trailing: const Icon(Icons.chevron_right, size: 20),
                       onTap: () {
-                        if (_aboutData!['privacy_url'] != null) {
+                        if (_aboutData!['privacy_url'] != null && _aboutData!['privacy_url'].toString().startsWith('http')) {
                           _launchUrl(_aboutData!['privacy_url']);
+                        } else {
+                          context.push('/account/privacy');
                         }
                       },
                     ),

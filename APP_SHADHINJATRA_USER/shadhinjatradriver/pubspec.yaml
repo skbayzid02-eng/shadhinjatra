@@ -1,4 +1,4 @@
-name: shadhinjatradriver
+﻿name: shadhinjatradriver
 description: "Shadhin Jatra Driver Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -43,6 +43,7 @@ dependencies:
   firebase_core: ^4.15.0
   firebase_messaging: ^16.7.0
   easy_localization: ^3.0.8
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:

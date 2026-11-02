@@ -1,19 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shadhinjatra/services/auth_service.dart';
-import 'package:shadhinjatra/screens/login_screen.dart';
-import 'package:shadhinjatra/screens/activity_screen.dart';
-import 'package:shadhinjatra/screens/account/profile/profile_screen.dart';
-import 'package:shadhinjatra/screens/account/wallet/wallet_screen.dart';
-import 'package:shadhinjatra/screens/account/payment/payment_methods_screen.dart';
-import 'package:shadhinjatra/screens/account/saved_places/saved_places_screen.dart';
-import 'package:shadhinjatra/screens/account/settings/settings_screen.dart';
-import 'package:shadhinjatra/screens/account/privacy/privacy_screen.dart';
-import 'package:shadhinjatra/screens/account/safety/safety_screen.dart';
-import 'package:shadhinjatra/screens/account/emergency/emergency_screen.dart';
-import 'package:shadhinjatra/screens/account/support/support_screen.dart';
-import 'package:shadhinjatra/screens/account/notifications/notifications_screen.dart';
-import 'package:shadhinjatra/screens/account/about/about_screen.dart';
 
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key});
@@ -79,22 +67,23 @@ class _AccountScreenState extends State<AccountScreen> {
   void _logout() async {
     await AuthService.logout();
     if (mounted) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-        (route) => false,
-      );
+      context.go('/login');
     }
   }
 
-  Widget _buildMenuItem({required IconData icon, required String title, String? subtitle, required Widget page}) {
+  Widget _buildMenuItem({
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required String routePath,
+  }) {
     return ListTile(
       leading: Icon(icon, color: Colors.black87),
       title: Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
       subtitle: subtitle != null ? Text(subtitle, style: const TextStyle(color: Colors.deepPurple, fontWeight: FontWeight.bold)) : null,
       trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
       onTap: () {
-        Navigator.push(context, MaterialPageRoute(builder: (context) => page));
+        context.push(routePath);
       },
     );
   }
@@ -127,7 +116,7 @@ class _AccountScreenState extends State<AccountScreen> {
                         children: [
                           GestureDetector(
                             onTap: () {
-                              Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen()));
+                              context.push('/account/profile');
                             },
                             child: Stack(
                               children: [
@@ -198,23 +187,35 @@ class _AccountScreenState extends State<AccountScreen> {
                     
                     // Payments & Wallet Section
                     _buildMenuItem(
+                      icon: Icons.card_membership,
+                      title: 'Driver Subscription (মাসিক সাবস্ক্রিপশন)',
+                      routePath: '/account/subscription',
+                    ),
+                    _buildDivider(),
+                    _buildMenuItem(
+                      icon: Icons.monetization_on,
+                      title: 'Earnings & Payouts (আয়ের হিসাব)',
+                      routePath: '/account/earnings',
+                    ),
+                    _buildDivider(),
+                    _buildMenuItem(
                       icon: Icons.account_balance_wallet,
                       title: 'Wallet / Payment',
                       subtitle: _account?['wallet_balance'] != null ? '৳${_account!['wallet_balance']}' : null,
-                      page: const WalletScreen(),
+                      routePath: '/account/wallet',
                     ),
                     _buildDivider(),
                     _buildMenuItem(
                       icon: Icons.credit_card,
                       title: 'Payment Methods',
-                      page: const PaymentMethodsScreen(),
+                      routePath: '/account/payment-methods',
                     ),
                     _buildDivider(),
                     _buildMenuItem(
                       icon: Icons.card_giftcard,
                       title: 'Shadhin Jatra Cash / Credits',
                       subtitle: _account?['uber_cash'] != null ? '৳${_account!['uber_cash']}' : null,
-                      page: const WalletScreen(),
+                      routePath: '/account/wallet',
                     ),
                     
                     Container(height: 8, color: Colors.grey.shade100), // Section Spacer
@@ -223,31 +224,31 @@ class _AccountScreenState extends State<AccountScreen> {
                     _buildMenuItem(
                       icon: Icons.history,
                       title: 'Trips',
-                      page: const ActivityScreen(), // Reusing ActivityScreen for trips
+                      routePath: '/activity',
                     ),
                     _buildDivider(),
                     _buildMenuItem(
                       icon: Icons.bookmark,
                       title: 'Saved Places',
-                      page: const SavedPlacesScreen(),
+                      routePath: '/account/saved-places',
                     ),
 
                     Container(height: 8, color: Colors.grey.shade100), // Section Spacer
                     
                     // Settings & Support
-                    _buildMenuItem(icon: Icons.settings, title: 'Settings', page: const SettingsScreen()),
+                    _buildMenuItem(icon: Icons.settings, title: 'Settings', routePath: '/account/settings'),
                     _buildDivider(),
-                    _buildMenuItem(icon: Icons.privacy_tip, title: 'Privacy', page: const PrivacyScreen()),
+                    _buildMenuItem(icon: Icons.privacy_tip, title: 'Privacy', routePath: '/account/privacy'),
                     _buildDivider(),
-                    _buildMenuItem(icon: Icons.security, title: 'Safety', page: const SafetyScreen()),
+                    _buildMenuItem(icon: Icons.security, title: 'Safety', routePath: '/account/safety'),
                     _buildDivider(),
-                    _buildMenuItem(icon: Icons.emergency, title: 'Emergency Assistance', page: const EmergencyScreen()),
+                    _buildMenuItem(icon: Icons.emergency, title: 'Emergency Assistance', routePath: '/account/emergency'),
                     _buildDivider(),
-                    _buildMenuItem(icon: Icons.help_outline, title: 'Help / Support', page: const SupportScreen()),
+                    _buildMenuItem(icon: Icons.help_outline, title: 'Help / Support', routePath: '/account/support'),
                     _buildDivider(),
-                    _buildMenuItem(icon: Icons.notifications, title: 'Notifications', page: const NotificationsScreen()),
+                    _buildMenuItem(icon: Icons.notifications, title: 'Notifications', routePath: '/notifications'),
                     _buildDivider(),
-                    _buildMenuItem(icon: Icons.info_outline, title: 'About', page: const AboutScreen()),
+                    _buildMenuItem(icon: Icons.info_outline, title: 'About', routePath: '/account/about'),
                     
                     Container(height: 8, color: Colors.grey.shade100), // Section Spacer
 

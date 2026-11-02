@@ -13,7 +13,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'phone', 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation', 'address', 'password', 'avatar', 'wallet_balance', 'is_online', 'latitude', 'longitude', 'heading', 'speed', 'accuracy', 'last_location_updated_at', 'vehicle_type', 'vehicle_model', 'vehicle_number', 'vehicle_color', 'vehicle_status', 'rating', 'total_ratings', 'is_verified', 'verification_status', 'documents_verified', 'subscription_status', 'subscription_expires_at', 'last_seen_at', 'push_notifications'])]
+#[Fillable(['name', 'email', 'phone', 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation', 'address', 'password', 'avatar', 'wallet_balance', 'is_online', 'online_since', 'latitude', 'longitude', 'heading', 'speed', 'accuracy', 'last_location_updated_at', 'vehicle_type', 'vehicle_model', 'vehicle_number', 'vehicle_color', 'vehicle_status', 'rating', 'total_ratings', 'is_verified', 'verification_status', 'documents_verified', 'subscription_status', 'subscription_expires_at', 'last_seen_at', 'push_notifications'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -36,6 +36,7 @@ class User extends Authenticatable
             'speed' => 'float',
             'accuracy' => 'float',
             'is_online' => 'boolean',
+            'online_since' => 'datetime',
             'is_verified' => 'boolean',
             'documents_verified' => 'boolean',
             'push_notifications' => 'boolean',
@@ -44,6 +45,44 @@ class User extends Authenticatable
             'total_ratings' => 'integer',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Determine if user has a valid, active subscription.
+     */
+    public function hasActiveSubscription(): bool
+    {
+        if ($this->subscription_status !== 'active' || $this->subscription_expires_at === null) {
+            return false;
+        }
+
+        return $this->subscription_expires_at->isFuture();
+    }
+
+    /**
+     * Get remaining days until subscription expires.
+     */
+    public function subscriptionDaysRemaining(): int
+    {
+        if (!$this->hasActiveSubscription()) {
+            return 0;
+        }
+
+        $hours = now()->diffInHours($this->subscription_expires_at, false);
+        return max(0, (int) ceil($hours / 24.0));
+    }
+
+    /**
+     * Determine if subscription is expiring soon (within threshold days).
+     */
+    public function isSubscriptionExpiringSoon(int $thresholdDays = 3): bool
+    {
+        if (!$this->hasActiveSubscription()) {
+            return false;
+        }
+
+        $remaining = $this->subscriptionDaysRemaining();
+        return $remaining <= $thresholdDays;
     }
 
     /**
@@ -94,5 +133,15 @@ class User extends Authenticatable
     public function driverRides(): HasMany
     {
         return $this->hasMany(Ride::class, 'driver_id');
+    }
+
+    /**
+     * Get subscription payments made by the driver/user.
+     *
+     * @return HasMany<SubscriptionPayment, User>
+     */
+    public function subscriptionPayments(): HasMany
+    {
+        return $this->hasMany(SubscriptionPayment::class, 'user_id');
     }
 }

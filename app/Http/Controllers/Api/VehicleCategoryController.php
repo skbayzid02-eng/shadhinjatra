@@ -23,12 +23,113 @@ class VehicleCategoryController extends Controller
             (new VehicleCategorySeeder())->run();
         }
 
-        $categories = VehicleCategory::orderBy('id')->get();
+        $order = ['Private Car', 'Microbus', 'CNG', 'Motorcycle', 'Rickshaw', 'Easy Bike', 'Cargo Vehicle', 'Car', 'Bike'];
+        $categories = VehicleCategory::all()->sortBy(function ($cat) use ($order) {
+            $idx = array_search($cat->name, $order);
+            return $idx !== false ? $idx : 999;
+        })->values();
 
         return response()->json([
             'success' => true,
             'data' => $categories,
             'message' => 'Vehicle categories fetched successfully',
+        ]);
+    }
+
+    /**
+     * Calculate fares and available drivers for all vehicle categories dynamically.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function calculateFares(Request $request): JsonResponse
+    {
+        $request->validate([
+            'distance_km' => 'required|numeric|min:0',
+            'duration_mins' => 'nullable|numeric|min:0',
+            'pickup_lat' => 'nullable|numeric',
+            'pickup_lon' => 'nullable|numeric',
+        ]);
+
+        $distanceKm = (float) $request->distance_km;
+        $durationMins = (float) ($request->duration_mins ?? ($distanceKm / 25.0 * 60.0));
+        $pickupLat = (float) ($request->pickup_lat ?? 23.8103);
+        $pickupLon = (float) ($request->pickup_lon ?? 90.4125);
+
+        // Auto-seed default categories if empty
+        if (VehicleCategory::count() === 0) {
+            (new VehicleCategorySeeder())->run();
+        }
+
+        $order = ['Private Car', 'Microbus', 'CNG', 'Motorcycle', 'Rickshaw', 'Easy Bike', 'Cargo Vehicle', 'Car', 'Bike'];
+        $categories = VehicleCategory::all()->sortBy(function ($cat) use ($order) {
+            $idx = array_search($cat->name, $order);
+            return $idx !== false ? $idx : 999;
+        })->values();
+        $dispatchService = app(\App\Services\RideDispatchService::class);
+
+        // Fetch all online drivers with locations
+        $onlineDrivers = \App\Models\User::where('is_online', true)
+            ->whereNotNull('latitude')
+            ->whereNotNull('longitude')
+            ->get();
+
+        $result = [];
+
+        foreach ($categories as $cat) {
+            $baseFare = (float) $cat->base_fare;
+            $perKm = (float) $cat->per_km_rate;
+            $perMin = (float) $cat->per_min_rate;
+            $minFare = (float) $cat->min_fare;
+
+            $totalFare = max($minFare, round($baseFare + ($distanceKm * $perKm) + ($durationMins * $perMin)));
+
+            // Count nearby drivers for this specific category (within 5km radius)
+            $compatibleTypes = $dispatchService->getCompatibleVehicleTypes($cat->name);
+            $availableDrivers = 0;
+            $minDistance = 999.0;
+
+            foreach ($onlineDrivers as $driver) {
+                if (in_array($driver->vehicle_type, $compatibleTypes)) {
+                    $dLat = (float) $driver->latitude;
+                    $dLon = (float) $driver->longitude;
+                    $dist = $dispatchService->calculateDistance($pickupLat, $pickupLon, $dLat, $dLon);
+                    if ($dist <= 5.0) {
+                        $availableDrivers++;
+                        if ($dist < $minDistance) {
+                            $minDistance = $dist;
+                        }
+                    }
+                }
+            }
+
+            // Estimate ETA in minutes: based on closest driver distance or default
+            $etaMins = ($availableDrivers > 0)
+                ? max(2, min(15, (int) round(($minDistance / 25.0) * 60.0)))
+                : 0;
+
+            $result[] = [
+                'id' => $cat->id,
+                'name' => $cat->name,
+                'icon' => $cat->icon,
+                'capacity' => $cat->capacity,
+                'base_fare' => $baseFare,
+                'per_km_rate' => $perKm,
+                'per_min_rate' => $perMin,
+                'min_fare' => $minFare,
+                'fare_amount' => $totalFare,
+                'available_drivers_count' => $availableDrivers,
+                'has_drivers' => $availableDrivers > 0,
+                'eta_minutes' => $etaMins,
+                'eta_text' => $availableDrivers > 0 ? "{$etaMins} mins" : 'No Drivers Available',
+            ];
+        }
+
+        return response()->json([
+            'success' => true,
+            'distance_km' => $distanceKm,
+            'duration_mins' => (int) round($durationMins),
+            'data' => $result,
         ]);
     }
 

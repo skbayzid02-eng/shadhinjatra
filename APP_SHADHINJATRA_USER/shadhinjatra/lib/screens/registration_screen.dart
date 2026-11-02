@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:shadhinjatra/routes/app_router.dart' show AuthNotifier;
 import 'package:shadhinjatra/services/auth_service.dart';
-import 'package:shadhinjatra/screens/login_screen.dart';
-import 'package:shadhinjatra/screens/main_navigation.dart';
 
 class RegistrationScreen extends StatefulWidget {
   const RegistrationScreen({super.key});
@@ -39,11 +39,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     });
 
     if (result['success'] == true) {
+      AuthNotifier.instance.setLoggedIn(true);
       if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const MainNavigation()),
-        );
+        context.go('/');
       }
     } else {
       setState(() {
@@ -209,10 +207,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                       const SizedBox(height: 16),
                       TextButton(
                         onPressed: () {
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(builder: (context) => const LoginScreen()),
-                          );
+                          context.go('/login');
                         },
                         child: const Text('Already have an account? Log in'),
                       ),

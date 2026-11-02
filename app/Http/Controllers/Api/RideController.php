@@ -26,15 +26,24 @@ class RideController extends Controller
             'dropoff_lat' => 'nullable|numeric',
             'dropoff_lon' => 'nullable|numeric',
             'vehicle_type' => 'required|string',
-            'distance_km' => 'required|numeric',
+            'distance_km' => 'nullable|numeric',
             'fare_amount' => 'required|numeric',
-            'payment_method' => 'required|string|in:cash,online',
+            'payment_method' => 'required|string|in:cash,wallet,online',
         ]);
 
         $fare = (float) $validated['fare_amount'];
         $commissionRate = ((float) \App\Models\Setting::get('platform_commission_percent', 10.0)) / 100.0;
         $commission = round($fare * $commissionRate, 2);
         $driverEarnings = round($fare - $commission, 2);
+
+        $distKm = isset($validated['distance_km']) && (float) $validated['distance_km'] > 0
+            ? (float) $validated['distance_km']
+            : (new \App\Services\RideDispatchService())->calculateDistance(
+                (float) ($request->pickup_lat ?? 23.8103),
+                (float) ($request->pickup_lon ?? 90.4125),
+                (float) ($request->dropoff_lat ?? 23.8103),
+                (float) ($request->dropoff_lon ?? 90.4125)
+            );
 
         $ride = Ride::create([
             'user_id' => $request->user()->id,
@@ -45,14 +54,16 @@ class RideController extends Controller
             'dropoff_lat' => $request->dropoff_lat,
             'dropoff_lon' => $request->dropoff_lon,
             'vehicle_type' => $validated['vehicle_type'],
-            'distance_km' => $validated['distance_km'],
+            'distance_km' => $distKm,
             'fare_amount' => $fare,
             'commission_amount' => $commission,
             'driver_earnings' => $driverEarnings,
             'payment_method' => $validated['payment_method'],
             'status' => 'pending',
             'otp' => (string) rand(100000, 999999),
-            'otp_expires_at' => now()->addMinutes(30),
+            'otp_expires_at' => now()->addMinutes(5),
+            'otp_attempts' => 0,
+            'otp_resend_count' => 0,
         ]);
 
         // Create in-app notification for passenger
@@ -74,6 +85,13 @@ class RideController extends Controller
 
         // Broadcast to drivers
         \App\Events\RideRequested::dispatch($ride);
+
+        // Immediately start progressive dispatch cascade to closest qualified drivers
+        try {
+            app(\App\Services\RideDispatchService::class)->dispatchToNextBatch($ride);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("Immediate dispatch error: {$e->getMessage()}");
+        }
 
         return response()->json([
             'success' => true,
@@ -252,6 +270,13 @@ class RideController extends Controller
                 'otp' => ($userId === $ride->user_id) ? $ride->otp : null,
                 'otp_expires_at' => ($userId === $ride->user_id && $ride->otp_expires_at) ? $ride->otp_expires_at->toIso8601String() : null,
                 'requires_otp' => ($userId === $ride->driver_id),
+                'arrived_at' => $ride->arrived_at ? $ride->arrived_at->toIso8601String() : null,
+                'started_at' => $ride->started_at ? $ride->started_at->toIso8601String() : null,
+                'completed_at' => $ride->completed_at ? $ride->completed_at->toIso8601String() : null,
+                'waiting_seconds' => ($ride->status === 'arrived' && $ride->arrived_at)
+                    ? max(0, Carbon::parse($ride->arrived_at)->diffInSeconds(now()))
+                    : 0,
+                'free_waiting_minutes' => 5,
                 'vehicle_type' => $ride->vehicle_type,
                 'fare_amount' => $ride->fare_amount,
                 'cancellation_fee' => (float) ($ride->cancellation_fee ?? 0.0),
@@ -328,7 +353,107 @@ class RideController extends Controller
                     'driver_verified' => (bool) ($driver?->is_verified ?? true),
                     'otp' => ($userId === $ride->user_id) ? $ride->otp : null,
                 ],
+
+                'dispatch' => [
+                    'search_radius_km' => (float) ($ride->search_radius_km ?? 5.0),
+                    'search_radius_text' => '৫ কিমি এলাকা',
+                    'dispatch_attempt' => (int) ($ride->dispatch_attempt ?? 1),
+                    'is_sequential' => true,
+                    'seconds_remaining' => ($ride->status === 'pending' && $ride->dispatch_expires_at)
+                        ? max(0, (int) (Carbon::parse($ride->dispatch_expires_at)->diffInSeconds(now(), false) * -1))
+                        : 0,
+                    'total_timeout' => \App\Services\RideDispatchService::DISPATCH_TIMEOUT_SECONDS,
+                    'sequential_message' => '৫ কিমি এলাকার নিকটস্থ চালকের উত্তরের অপেক্ষা করা হচ্ছে...',
+                ],
             ]
+        ]);
+    }
+
+    /**
+     * Dedicated dispatch status API for passenger and driver monitoring.
+     * Shows 5 KM search radius, sequential dispatch state, and auto-cascades expired dispatches.
+     */
+    public function dispatchStatus(Request $request, $id = null)
+    {
+        // Auto-cascade any expired dispatches
+        app(\App\Services\RideDispatchService::class)->cascadeExpiredDispatches();
+
+        $user = $request->user();
+        $userId = $user->id;
+
+        $ride = null;
+        if ($id) {
+            $ride = Ride::with(['driver', 'passenger'])->find($id);
+        } else {
+            $ride = Ride::with(['driver', 'passenger'])
+                ->where('user_id', $userId)
+                ->whereIn('status', ['pending', 'accepted', 'ongoing', 'arrived', 'started', 'no_drivers_found'])
+                ->latest('updated_at')
+                ->first();
+        }
+
+        if (!$ride) {
+            return response()->json([
+                'success' => false,
+                'message' => 'রাইডটি পাওয়া যায়নি',
+            ], 404);
+        }
+
+        $isPending = ($ride->status === 'pending');
+        $isAccepted = in_array($ride->status, ['accepted', 'ongoing', 'arrived', 'started', 'completed']);
+
+        $secondsRemaining = 0;
+        if ($isPending && $ride->dispatch_expires_at) {
+            $secondsRemaining = max(0, (int) (Carbon::parse($ride->dispatch_expires_at)->diffInSeconds(now(), false) * -1));
+        }
+
+        $dispatchedDriverInfo = null;
+        if ($isPending && $ride->dispatched_driver_id) {
+            $drv = User::find($ride->dispatched_driver_id);
+            if ($drv) {
+                $pLat = (float) ($ride->pickup_lat ?? 23.8103);
+                $pLon = (float) ($ride->pickup_lon ?? 90.4125);
+                $dLat = (float) ($drv->latitude ?? $pLat);
+                $dLon = (float) ($drv->longitude ?? $pLon);
+                $distKm = app(\App\Services\RideDispatchService::class)->calculateDistance($dLat, $dLon, $pLat, $pLon);
+                $dispatchedDriverInfo = [
+                    'distance_km' => $distKm,
+                    'distance_text' => $distKm . ' কিমি দূরে',
+                    'rating' => (float) ($drv->rating ?? 5.0),
+                    'vehicle_type' => $drv->vehicle_type ?? $ride->vehicle_type,
+                ];
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'ride_id' => $ride->id,
+            'status' => $ride->status,
+            'search_radius_km' => (float) ($ride->search_radius_km ?? 5.0),
+            'search_radius_text' => '৫ কিমি এলাকা',
+            'is_pending' => $isPending,
+            'is_accepted' => $isAccepted,
+            'is_sequential' => true,
+            'dispatch_attempt' => (int) ($ride->dispatch_attempt ?? 1),
+            'seconds_remaining' => $secondsRemaining,
+            'total_timeout' => \App\Services\RideDispatchService::DISPATCH_TIMEOUT_SECONDS,
+            'dispatched_driver' => $dispatchedDriverInfo,
+            'driver' => $ride->driver ? [
+                'id' => $ride->driver->id,
+                'name' => $ride->driver->name,
+                'phone' => $ride->driver->phone,
+                'rating' => (float) ($ride->driver->rating ?? 5.0),
+                'vehicle_type' => $ride->driver->vehicle_type,
+                'vehicle_model' => $ride->driver->vehicle_model,
+                'vehicle_number' => $ride->driver->vehicle_number,
+            ] : null,
+            'message' => match ($ride->status) {
+                'pending' => '৫ কিমি এলাকায় নিকটস্থ চালকের উত্তরের অপেক্ষা করা হচ্ছে...',
+                'accepted', 'ongoing', 'arrived', 'started' => 'চালক রাইড গ্রহণ করেছেন!',
+                'no_drivers_found' => '৫ কিমি এলাকায় এই মুহূর্তে কোনো উপযুক্ত চালক পাওয়া যায়নি।',
+                'cancelled' => 'রাইডটি বাতিল করা হয়েছে।',
+                default => 'রাইড স্ট্যাটাস: ' . $ride->status,
+            },
         ]);
     }
 
@@ -337,38 +462,80 @@ class RideController extends Controller
      */
     public function nearbyDrivers(Request $request)
     {
-        $lat = (float) ($request->latitude ?? 23.8103);
-        $lng = (float) ($request->longitude ?? 90.4125);
+        $lat = (float) ($request->latitude ?? $request->lat ?? 23.8103);
+        $lng = (float) ($request->longitude ?? $request->lon ?? $request->lng ?? 90.4125);
+        $radiusKm = (float) ($request->radius ?? 5.0);
         $vehicleType = $request->vehicle_type;
 
-        $query = User::whereNotNull('vehicle_type')->where('is_online', true);
+        $dispatchService = app(\App\Services\RideDispatchService::class);
+        $compatibleTypes = $vehicleType ? $dispatchService->getCompatibleVehicleTypes($vehicleType) : null;
 
-        if ($vehicleType) {
-            $query->where('vehicle_type', $vehicleType);
-        }
+        // Fetch all online drivers with valid coordinates
+        $driversQuery = User::whereNotNull('vehicle_type')
+            ->where('is_online', true)
+            ->whereNotNull('latitude')
+            ->whereNotNull('longitude');
 
-        $drivers = $query->take(15)->get();
+        $allOnlineDrivers = $driversQuery->get();
 
         $list = [];
-        $index = 0;
-        foreach ($drivers as $driver) {
-            $dLat = $driver->latitude ? (float) $driver->latitude : ($lat + (sin($index * 1.5) * 0.007));
-            $dLng = $driver->longitude ? (float) $driver->longitude : ($lng + (cos($index * 1.5) * 0.007));
-            $index++;
+        $countsByCategory = [
+            'Private Car' => 0,
+            'Microbus' => 0,
+            'CNG' => 0,
+            'Motorcycle' => 0,
+            'Rickshaw' => 0,
+            'Easy Bike' => 0,
+            'Cargo Vehicle' => 0,
+        ];
 
-            $list[] = [
-                'id' => $driver->id,
-                'name' => $driver->name,
-                'vehicle_type' => $driver->vehicle_type ?? 'Car',
-                'latitude' => $dLat,
-                'longitude' => $dLng,
-                'rating' => 5.0,
-            ];
+        foreach ($allOnlineDrivers as $driver) {
+            $dLat = (float) $driver->latitude;
+            $dLng = (float) $driver->longitude;
+            $dist = $dispatchService->calculateDistance($lat, $lng, $dLat, $dLng);
+
+            // Update category counts if within 5km radius
+            if ($dist <= 5.0) {
+                $vType = $driver->vehicle_type ?? 'Private Car';
+                foreach ($countsByCategory as $catName => $cnt) {
+                    $compat = $dispatchService->getCompatibleVehicleTypes($catName);
+                    if (in_array($vType, $compat)) {
+                        $countsByCategory[$catName]++;
+                    }
+                }
+            }
+
+            // If filtering by specific vehicle type, check compatibility
+            if ($compatibleTypes && !in_array($driver->vehicle_type, $compatibleTypes)) {
+                continue;
+            }
+
+            // Check within requested radius
+            if ($dist <= $radiusKm) {
+                $list[] = [
+                    'id' => $driver->id,
+                    'name' => $driver->name,
+                    'phone' => $driver->phone,
+                    'avatar' => $driver->avatar ? asset('storage/' . $driver->avatar) : null,
+                    'vehicle_type' => $driver->vehicle_type ?? 'Private Car',
+                    'vehicle_model' => $driver->vehicle_model,
+                    'vehicle_number' => $driver->vehicle_number,
+                    'rating' => (float) ($driver->rating ?? 5.0),
+                    'latitude' => $dLat,
+                    'longitude' => $dLng,
+                    'distance_km' => $dist,
+                    'heading' => (float) ($driver->heading ?? 0.0),
+                ];
+            }
         }
+
+        // Sort by closest distance first
+        usort($list, fn($a, $b) => $a['distance_km'] <=> $b['distance_km']);
 
         return response()->json([
             'success' => true,
             'count' => count($list),
+            'counts_by_category' => $countsByCategory,
             'data' => $list,
         ]);
     }
@@ -432,10 +599,13 @@ class RideController extends Controller
             ], 404);
         }
 
-        if ($ride->user_id !== $request->user()->id) {
+        $user = $request->user();
+        $userId = $user->id;
+
+        if ($ride->user_id !== $userId && $ride->driver_id !== $userId) {
             return response()->json([
                 'success' => false,
-                'message' => 'অননুমোদিত অ্যাক্সেস! আপনি অন্যের রাইড বাতিল করতে পারবেন না।',
+                'message' => 'অননুমোদিত অ্যাক্সেস! আপনি এই রাইড বাতিল করতে পারবেন না।',
             ], 403);
         }
 
@@ -446,60 +616,87 @@ class RideController extends Controller
             ]);
         }
 
-        if ($ride->status === 'started' || $ride->status === 'completed') {
+        if ($ride->status === 'completed') {
             return response()->json([
                 'success' => false,
-                'message' => 'চলমান বা সম্পন্ন রাইড সরাসরি বাতিল করা সম্ভব নয়',
+                'message' => 'সম্পন্ন রাইড বাতিল করা সম্ভব নয়',
             ], 400);
         }
 
+        $isDriver = ($userId === $ride->driver_id);
+        $cancelledBy = $isDriver ? 'driver' : 'user';
+        $defaultReason = $isDriver ? 'ড্রাইভার কর্তৃক বাতিল' : 'যাত্রী কর্তৃক বাতিল';
+        $reason = $request->input('reason', $defaultReason);
+
         $fee = 0.0;
-        $reason = $request->input('reason', 'যাত্রী কর্তৃক বাতিল');
         $feeExplanation = 'কোনো প্রকার চার্জ ছাড়াই রাইডটি বাতিল করা হয়েছে।';
 
-        if (in_array($ride->status, ['accepted', 'ongoing'])) {
-            $acceptedAt = $ride->accepted_at ?? $ride->updated_at;
-            if ($acceptedAt && Carbon::parse($acceptedAt)->diffInMinutes(now()) >= 2) {
-                $fee = 30.00;
-                $feeExplanation = 'ড্রাইভার রওয়ানা হওয়ার ২ মিনিট পর বাতিল করায় ৳৩০ বাতিল ফি প্রযোজ্য হয়েছে।';
-            } else {
-                $feeExplanation = 'ড্রাইভার গ্রহণের ২ মিনিটের মধ্যে বাতিল করায় কোনো চার্জ প্রযোজ্য হয়নি।';
+        if (!$isDriver) {
+            if (in_array($ride->status, ['accepted', 'ongoing'])) {
+                $acceptedAt = $ride->accepted_at ?? $ride->updated_at;
+                if ($acceptedAt && Carbon::parse($acceptedAt)->diffInMinutes(now()) >= 2) {
+                    $fee = 30.00;
+                    $feeExplanation = 'ড্রাইভার রওয়ানা হওয়ার ২ মিনিট পর বাতিল করায় ৳৩০ বাতিল ফি প্রযোজ্য হয়েছে।';
+                } else {
+                    $feeExplanation = 'ড্রাইভার গ্রহণের ২ মিনিটের মধ্যে বাতিল করায় কোনো চার্জ প্রযোজ্য হয়নি।';
+                }
+            } elseif ($ride->status === 'arrived') {
+                $fee = 50.00;
+                $feeExplanation = 'ড্রাইভার পিকআপ পয়েন্টে উপস্থিত থাকার পর বাতিল করায় ৳৫০ বাতিল ফি প্রযোজ্য হয়েছে।';
             }
-        } elseif ($ride->status === 'arrived') {
-            $fee = 50.00;
-            $feeExplanation = 'ড্রাইভার পিকআপ পয়েন্টে উপস্থিত থাকার পর বাতিল করায় ৳৫০ বাতিল ফি প্রযোজ্য হয়েছে।';
+        } else {
+            $feeExplanation = 'ড্রাইভার অনুরোধ বাতিল করেছেন। কোনো চার্জ প্রযোজ্য নয়।';
         }
 
         $ride->status = 'cancelled';
         $ride->cancellation_fee = $fee;
         $ride->cancellation_reason = $reason;
-        $ride->cancelled_by = 'user';
+        $ride->cancelled_by = $cancelledBy;
         $ride->save();
 
         // Notify Passenger
-        Notification::create([
-            'user_id' => $request->user()->id,
-            'ride_id' => $ride->id,
-            'title' => 'রাইড বাতিল করা হয়েছে',
-            'message' => "আপনার {$ride->vehicle_type} রাইডটি বাতিল করা হয়েছে। {$feeExplanation}",
-            'type' => 'ride_cancelled',
-            'data' => [
+        if ($ride->passenger) {
+            $msg = $isDriver
+                ? "ড্রাইভার রাইডটি বাতিল করেছেন। কারণ: {$reason}"
+                : "আপনার {$ride->vehicle_type} রাইডটি বাতিল করা হয়েছে। {$feeExplanation}";
+
+            Notification::create([
+                'user_id' => $ride->user_id,
                 'ride_id' => $ride->id,
-                'cancellation_fee' => $fee,
-            ],
-            'is_read' => false,
-        ]);
+                'title' => 'রাইড বাতিল করা হয়েছে',
+                'message' => $msg,
+                'type' => 'ride_cancelled',
+                'data' => [
+                    'ride_id' => $ride->id,
+                    'cancelled_by' => $cancelledBy,
+                    'cancellation_fee' => $fee,
+                ],
+                'is_read' => false,
+            ]);
+
+            if ($ride->passenger->fcm_token) {
+                FcmService::send($ride->passenger->fcm_token, 'রাইড বাতিল হয়েছে', $msg, [
+                    'ride_id' => (string) $ride->id,
+                    'type' => 'ride_cancelled',
+                ]);
+            }
+        }
 
         // Notify Driver if assigned
         if ($ride->driver_id && $ride->driver) {
+            $driverMsg = $isDriver
+                ? "আপনি রাইডটি বাতিল করেছেন।"
+                : "যাত্রী রাইডটি বাতিল করেছেন।" . ($fee > 0 ? " বাতিল ক্ষতিপূরণ ফি: ৳{$fee}" : "");
+
             Notification::create([
                 'user_id' => $ride->driver_id,
                 'ride_id' => $ride->id,
-                'title' => 'যাত্রী রাইড বাতিল করেছেন',
-                'message' => "যাত্রী রাইডটি বাতিল করেছেন।" . ($fee > 0 ? " বাতিল ক্ষতিপূরণ ফি: ৳{$fee}" : ""),
+                'title' => $isDriver ? 'রাইড বাতিল সম্পন্ন' : 'যাত্রী রাইড বাতিল করেছেন',
+                'message' => $driverMsg,
                 'type' => 'ride_cancelled_by_passenger',
                 'data' => [
                     'ride_id' => $ride->id,
+                    'cancelled_by' => $cancelledBy,
                     'cancellation_fee' => $fee,
                 ],
                 'is_read' => false,
@@ -509,7 +706,7 @@ class RideController extends Controller
                 FcmService::send(
                     $ride->driver->fcm_token,
                     'রাইড বাতিল হয়েছে',
-                    "যাত্রী রাইডটি বাতিল করেছেন।" . ($fee > 0 ? " ক্ষতিপূরণ ফি: ৳{$fee}" : ""),
+                    $driverMsg,
                     ['ride_id' => (string) $ride->id, 'type' => 'ride_cancelled']
                 );
             }
@@ -518,9 +715,11 @@ class RideController extends Controller
         return response()->json([
             'success' => true,
             'cancellation_fee' => $fee,
+            'cancelled_by' => $cancelledBy,
             'message' => "রাইড সফলভাবে বাতিল করা হয়েছে। {$feeExplanation}",
             'data' => [
                 'ride_id' => $ride->id,
+                'cancelled_by' => $cancelledBy,
                 'cancellation_fee' => $fee,
                 'cancellation_reason' => $reason,
             ],
@@ -590,20 +789,42 @@ class RideController extends Controller
 
         // Security check: Validate OTP and expiration when starting the trip
         if ($status === 'started') {
-            $inputOtp = $request->input('otp');
-            if (empty($inputOtp) || trim((string)$inputOtp) !== trim((string)$ride->otp)) {
+            // Rule 3: Check if locked due to 5 failed attempts
+            if (($ride->otp_attempts ?? 0) >= 5) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'ভুল ওটিপি কোড! অনুগ্রহ করে যাত্রীর অ্যাপে প্রদর্শিত সঠিক ৬ সংখ্যার OTP লিখুন।',
+                    'locked' => true,
+                    'remaining_attempts' => 0,
+                    'message' => 'সর্বোচ্চ ৫ বার ভুল OTP দেওয়ার কারণে সাময়িকভাবে ব্লক করা হয়েছে। অনুগ্রহ করে নতুন OTP রিকোয়েস্ট করুন।',
                 ], 422);
             }
+
+            // Rule 2: Check 5-minute validity expiration
             if ($ride->otp_expires_at && now()->isAfter($ride->otp_expires_at)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'ওটিপির মেয়াদ শেষ হয়ে গেছে! অনুগ্রহ করে যাত্রীর অ্যাপ থেকে নতুন ওটিপি সংগ্রহ করুন।',
                     'otp_expired' => true,
+                    'message' => 'ওটিপির মেয়াদ (৫ মিনিট) শেষ হয়ে গেছে! অনুগ্রহ করে নতুন ওটিপি সংগ্রহ করুন।',
                 ], 422);
             }
+
+            $inputOtp = $request->input('otp');
+            if (empty($inputOtp) || trim((string)$inputOtp) !== trim((string)$ride->otp)) {
+                $ride->increment('otp_attempts');
+                $remainingAttempts = max(0, 5 - (int) $ride->otp_attempts);
+                $isLocked = ($remainingAttempts === 0);
+
+                return response()->json([
+                    'success' => false,
+                    'locked' => $isLocked,
+                    'remaining_attempts' => $remainingAttempts,
+                    'message' => $isLocked
+                        ? 'সর্বোচ্চ ৫ বার ভুল OTP দেওয়া হয়েছে। এই OTP টি ব্লক হয়ে গেছে, অনুগ্রহ করে নতুন OTP রিকোয়েস্ট করুন।'
+                        : "ভুল ওটিপি কোড! আর {$remainingAttempts} বার চেষ্টা করা যাবে।",
+                ], 422);
+            }
+
+            $ride->otp_verified_at = now();
             $ride->started_at = now();
         } elseif ($status === 'arrived') {
             $ride->arrived_at = now();
@@ -845,16 +1066,44 @@ class RideController extends Controller
             ], 422);
         }
 
+        // Rule 5: Maximum 5 resends allowed
+        if (($ride->otp_resend_count ?? 0) >= 5) {
+            return response()->json([
+                'success' => false,
+                'max_resends_exceeded' => true,
+                'remaining_resends' => 0,
+                'message' => 'সর্বোচ্চ ৫ বার OTP পুনরায় পাঠানোর সীমা অতিক্রান্ত হয়েছে। নতুন করে আর OTP পাঠানো যাবে না।',
+            ], 429);
+        }
+
+        // Rule 4: 60-second cooldown required before OTP can be resent
+        if ($ride->otp_last_resent_at) {
+            $diffSec = Carbon::parse($ride->otp_last_resent_at)->diffInSeconds(now());
+            if ($diffSec < 60) {
+                $wait = 60 - $diffSec;
+                return response()->json([
+                    'success' => false,
+                    'cooldown' => true,
+                    'cooldown_seconds' => $wait,
+                    'remaining_resends' => max(0, 5 - (int) ($ride->otp_resend_count ?? 0)),
+                    'message' => "৬০ সেকেন্ডের আগে OTP পুনরায় পাঠানো যাবে না। অনুগ্রহ করে {$wait} সেকেন্ড অপেক্ষা করুন।",
+                ], 429);
+            }
+        }
+
         $newOtp = (string) rand(100000, 999999);
         $ride->otp = $newOtp;
-        $ride->otp_expires_at = now()->addMinutes(15);
+        $ride->otp_expires_at = now()->addMinutes(5);
+        $ride->otp_attempts = 0;
+        $ride->otp_resend_count = ((int) ($ride->otp_resend_count ?? 0)) + 1;
+        $ride->otp_last_resent_at = now();
         $ride->save();
 
         Notification::create([
             'user_id' => $ride->user_id,
             'ride_id' => $ride->id,
             'title' => 'নতুন রাইড OTP কোড',
-            'message' => "আপনার নতুন OTP কোড: {$newOtp}। ড্রাইভার উপস্থিত হলে এই কোডটি দিন।",
+            'message' => "আপনার নতুন OTP কোড: {$newOtp}। ড্রাইভার উপস্থিত হলে এই কোডটি দিন (মেয়াদ ৫ মিনিট)।",
             'type' => 'new_otp',
             'data' => [
                 'ride_id' => $ride->id,
@@ -864,6 +1113,20 @@ class RideController extends Controller
             'is_read' => false,
         ]);
 
+        if ($ride->passenger && $ride->passenger->fcm_token) {
+            FcmService::send(
+                $ride->passenger->fcm_token,
+                'নতুন রাইড OTP কোড',
+                "আপনার নতুন OTP কোড: {$newOtp}। ড্রাইভার উপস্থিত হলে এই কোডটি দিন।",
+                [
+                    'ride_id' => (string) $ride->id,
+                    'type' => 'new_otp',
+                    'otp' => $newOtp,
+                    'expires_at' => $ride->otp_expires_at->toIso8601String(),
+                ]
+            );
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'নতুন OTP সফলভাবে জেনারেট করা হয়েছে।',
@@ -871,6 +1134,9 @@ class RideController extends Controller
                 'ride_id' => $ride->id,
                 'otp' => ($request->user()->id === $ride->user_id) ? $newOtp : null,
                 'otp_expires_at' => $ride->otp_expires_at->toIso8601String(),
+                'cooldown_seconds' => 60,
+                'resend_count' => $ride->otp_resend_count,
+                'remaining_resends' => max(0, 5 - $ride->otp_resend_count),
             ],
         ]);
     }
