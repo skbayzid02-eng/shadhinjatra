@@ -41,7 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _paymentMethod = 'online';
   String _userName = '';
 
-  final List<Map<String, dynamic>> _vehicles = [
+  List<Map<String, dynamic>> _vehicles = [
     {'name': 'Car', 'icon': 'directions_car', 'base_fare': 50.0, 'per_km_rate': 20.0, 'per_min_rate': 2.0, 'min_fare': 80.0, 'capacity': '2-4 pass'},
     {'name': 'Bike', 'icon': 'motorcycle', 'base_fare': 30.0, 'per_km_rate': 12.0, 'per_min_rate': 1.0, 'min_fare': 50.0, 'capacity': '1 pass'},
     {'name': 'CNG', 'icon': 'electric_rickshaw', 'base_fare': 40.0, 'per_km_rate': 15.0, 'per_min_rate': 1.5, 'min_fare': 60.0, 'capacity': '2-3 pass'},
@@ -81,6 +81,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _getUserLocation();
     _fetchUserName();
     _fetchNotificationsCount();
+    _fetchVehiclesFromDatabase();
     _checkAndRestoreActiveRide();
     _startNotificationPolling();
     _startNearbyDriversPolling();
@@ -168,6 +169,23 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
+  Future<void> _fetchVehiclesFromDatabase() async {
+    try {
+      final dbVehicles = await AuthService.fetchVehicles();
+      if (dbVehicles.isNotEmpty && mounted) {
+        setState(() {
+          _vehicles = dbVehicles;
+          if (!_vehicles.any((v) => v['name'] == _selectedVehicle)) {
+            _selectedVehicle = _vehicles.first['name']?.toString() ?? 'Car';
+          }
+        });
+        _updateFare();
+      }
+    } catch (e) {
+      debugPrint('Failed to load dynamic vehicles from database: $e');
+    }
+  }
+
   void _startNotificationPolling() {
     _notificationPollTimer?.cancel();
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
@@ -215,10 +233,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   double _calculateFareForVehicle(Map<String, dynamic> vehicle) {
     if (_distanceKm == 0) return 0.0;
-    final base = (vehicle['base_fare'] as num).toDouble();
-    final perKm = (vehicle['per_km_rate'] as num).toDouble();
-    final perMin = (vehicle['per_min_rate'] as num).toDouble();
-    final minFare = (vehicle['min_fare'] as num).toDouble();
+    final base = (vehicle['base_fare'] as num?)?.toDouble() ?? 0.0;
+    final perKm = (vehicle['per_km_rate'] as num?)?.toDouble() ?? 0.0;
+    final perMin = (vehicle['per_min_rate'] as num?)?.toDouble() ?? 0.0;
+    final minFare = (vehicle['min_fare'] as num?)?.toDouble() ?? 0.0;
 
     final distanceFare = _distanceKm * perKm;
     final timeFare = _durationMins * perMin;
@@ -228,8 +246,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _updateFare() {
-    if (_distanceKm > 0) {
-      final vehicle = _vehicles.firstWhere((v) => v['name'] == _selectedVehicle);
+    if (_distanceKm > 0 && _vehicles.isNotEmpty) {
+      final vehicle = _vehicles.firstWhere(
+        (v) => v['name'] == _selectedVehicle,
+        orElse: () => _vehicles.first,
+      );
       setState(() {
         _fareAmount = _calculateFareForVehicle(vehicle);
       });
@@ -1316,20 +1337,45 @@ class _HomeScreenState extends State<HomeScreen> {
                 final isSelected = _selectedVehicle == v['name'];
                 final fare = _calculateFareForVehicle(v);
 
-                IconData getIcon(String name) {
-                  switch (name) {
-                    case 'directions_car': return Icons.directions_car;
-                    case 'motorcycle': return Icons.motorcycle;
-                    case 'electric_rickshaw': return Icons.electric_rickshaw;
-                    case 'pedal_bike': return Icons.pedal_bike;
-                    case 'airport_shuttle': return Icons.airport_shuttle;
-                    default: return Icons.local_taxi;
+                IconData getIcon(String? name) {
+                  final lower = (name ?? '').toLowerCase();
+                  switch (lower) {
+                    case 'directions_car':
+                    case 'car':
+                    case 'private':
+                      return Icons.directions_car;
+                    case 'motorcycle':
+                    case 'bike':
+                    case 'two_wheeler':
+                    case 'scooter':
+                      return Icons.motorcycle;
+                    case 'electric_rickshaw':
+                    case 'cng':
+                    case 'auto':
+                    case 'tuk_tuk':
+                      return Icons.electric_rickshaw;
+                    case 'pedal_bike':
+                    case 'rickshaw':
+                    case 'bicycle':
+                    case 'cycle':
+                      return Icons.pedal_bike;
+                    case 'airport_shuttle':
+                    case 'microbus':
+                    case 'micro':
+                    case 'van':
+                      return Icons.airport_shuttle;
+                    case 'local_shipping':
+                    case 'truck':
+                    case 'cargo':
+                      return Icons.local_shipping;
+                    default:
+                      return Icons.local_taxi;
                   }
                 }
 
                 return GestureDetector(
                   onTap: () {
-                    setState(() => _selectedVehicle = v['name']);
+                    setState(() => _selectedVehicle = v['name']?.toString() ?? 'Car');
                     _updateFare();
                   },
                   child: AnimatedContainer(
@@ -1347,19 +1393,19 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     child: Row(
                       children: [
-                        Icon(getIcon(v['icon'] ?? ''), color: isSelected ? Colors.white : Colors.black87, size: 36),
+                        Icon(getIcon(v['icon']?.toString()), color: isSelected ? Colors.white : Colors.black87, size: 36),
                         const SizedBox(width: 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(v['name'], style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: isSelected ? Colors.white : Colors.black)),
+                              Text(v['name']?.toString() ?? '', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: isSelected ? Colors.white : Colors.black)),
                               const SizedBox(height: 4),
                               Row(
                                 children: [
                                   Icon(Icons.person, size: 12, color: isSelected ? Colors.white70 : Colors.grey),
                                   const SizedBox(width: 4),
-                                  Text(v['capacity'] ?? '', style: TextStyle(color: isSelected ? Colors.white70 : Colors.grey, fontSize: 12, fontWeight: FontWeight.w500)),
+                                  Text(v['capacity']?.toString() ?? '', style: TextStyle(color: isSelected ? Colors.white70 : Colors.grey, fontSize: 12, fontWeight: FontWeight.w500)),
                                 ],
                               )
                             ],
