@@ -372,28 +372,46 @@ class RideDispatchService
     public function getCompatibleVehicleTypes(?string $vehicleType): array
     {
         if (!$vehicleType) {
-            return ['Car', 'Private Car', 'Bike', 'CNG', 'Rickshaw', 'Microbus', 'Cargo Vehicle'];
+            return ['Private Car', 'Microbus', 'CNG', 'Motorcycle', 'Rickshaw', 'Easy Bike', 'Cargo Vehicle', 'Car', 'Bike'];
         }
 
         $type = strtolower(trim($vehicleType));
-        if (str_contains($type, 'car') || str_contains($type, 'private') || str_contains($type, 'sedan')) {
-            return ['Car', 'Private Car', 'Sedan'];
+
+        // 1. Easy Bike (Battery Rickshaw / Tomtom)
+        if (str_contains($type, 'easy') || str_contains($type, 'battery') || str_contains($type, 'tomtom')) {
+            return ['Easy Bike', 'Battery Rickshaw', 'Tomtom'];
         }
-        if (str_contains($type, 'bike') || str_contains($type, 'motor') || str_contains($type, 'scooter')) {
-            return ['Bike', 'Motorcycle', 'Scooter'];
+
+        // 2. Rickshaw (Traditional paddle rickshaw)
+        if (str_contains($type, 'rickshaw')) {
+            return ['Rickshaw', 'Paddle Rickshaw'];
         }
+
+        // 3. Motorcycle / Bike
+        if (str_contains($type, 'motor') || str_contains($type, 'scooter') || str_contains($type, 'bike')) {
+            return ['Motorcycle', 'Bike', 'Scooter'];
+        }
+
+        // 4. CNG Auto-Rickshaw
         if (str_contains($type, 'cng') || str_contains($type, 'auto')) {
             return ['CNG', 'Auto', 'Auto Rickshaw'];
         }
-        if (str_contains($type, 'rickshaw') || str_contains($type, 'easy')) {
-            return ['Rickshaw', 'Easy Bike', 'Battery Rickshaw'];
-        }
+
+        // 5. Microbus (HiAce, Noah, Van)
         if (str_contains($type, 'micro') || str_contains($type, 'van') || str_contains($type, 'hiace') || str_contains($type, 'noah')) {
-            return ['Microbus', 'HiAce', 'Noah'];
+            return ['Microbus', 'HiAce', 'Noah', 'Van'];
         }
+
+        // 6. Cargo Vehicle (Pickup, Truck)
         if (str_contains($type, 'cargo') || str_contains($type, 'pickup') || str_contains($type, 'truck')) {
-            return ['Cargo', 'Cargo Vehicle', 'Pickup', 'Truck'];
+            return ['Cargo Vehicle', 'Cargo', 'Pickup', 'Truck'];
         }
+
+        // 7. Private Car / Sedan
+        if (str_contains($type, 'car') || str_contains($type, 'private') || str_contains($type, 'sedan')) {
+            return ['Private Car', 'Car', 'Sedan'];
+        }
+
         if (str_contains($type, 'ambulance') || str_contains($type, 'emergency')) {
             return ['Ambulance', 'Emergency Ambulance'];
         }

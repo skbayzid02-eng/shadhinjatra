@@ -10,19 +10,35 @@ class NotificationsScreen extends StatefulWidget {
   State<NotificationsScreen> createState() => _NotificationsScreenState();
 }
 
-class _NotificationsScreenState extends State<NotificationsScreen> {
+class _NotificationsScreenState extends State<NotificationsScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   bool _isLoading = true;
   List<dynamic> _notifications = [];
   int _unreadCount = 0;
+  int _notifTabUnread = 0;
+  int _supportTabUnread = 0;
   bool _notificationsEnabled = true;
-  bool _isToggling = false;
+  String _selectedFilter = 'all'; // 'all', 'rides', 'system', 'announcements'
+
   final Set<int> _confirmingIds = {};
   final Set<int> _rejectingIds = {};
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        setState(() {});
+      }
+    });
     _loadNotifications();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadNotifications() async {
@@ -32,19 +48,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         _isLoading = false;
         if (result['success'] == true) {
           final List<dynamic> fetched = result['data'] ?? [];
-          final bool hasNewRideRequest = fetched.any((item) => item['type'] == 'ride_request' && item['is_read'] != true);
+          final bool hasNewRideRequest = fetched.any(
+            (item) => (item['type'] == 'ride_request' || item['type'] == 'new_ride_request') && item['is_read'] != true,
+          );
           if (hasNewRideRequest) {
-            // Play audible alert and haptic feedback for incoming ride request
             SystemSound.play(SystemSoundType.alert);
             HapticFeedback.heavyImpact();
-            Future.delayed(const Duration(milliseconds: 350), () {
-              SystemSound.play(SystemSoundType.alert);
-              HapticFeedback.heavyImpact();
-            });
           }
           _notifications = fetched;
           _unreadCount = result['unread_count'] ?? 0;
           _notificationsEnabled = result['notifications_enabled'] ?? true;
+
+          final counts = result['counts'] is Map ? result['counts'] as Map : {};
+          _notifTabUnread = counts['notifications_tab'] ?? _unreadCount;
+          _supportTabUnread = counts['support_tab'] ?? 0;
         }
       });
     }
@@ -52,18 +69,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Future<void> _toggleNotifications(bool value) async {
     setState(() {
-      _isToggling = true;
       _notificationsEnabled = value;
-      if (!value) {
-        _unreadCount = 0;
-      }
+      if (!value) _unreadCount = 0;
     });
 
     final res = await AuthService.toggleDriverNotifications(value);
     if (!mounted) return;
 
     setState(() {
-      _isToggling = false;
       if (res['success'] == true) {
         _notificationsEnabled = res['notifications_enabled'] ?? value;
       } else {
@@ -74,9 +87,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          res['message'] ?? (value ? 'নোটিফিকেশন চালু করা হয়েছে' : 'হোম পেজ নোটিফিকেশন অফ করা হয়েছে, কোনো মেসেজ আসবে না'),
+          res['message'] ?? (value ? 'নোটিফিকেশন চালু করা হয়েছে' : 'নোটিফিকেশন বন্ধ করা হয়েছে'),
         ),
-        backgroundColor: value ? Colors.green : Colors.grey.shade800,
+        backgroundColor: value ? const Color(0xFF16A34A) : const Color(0xFF334155),
         duration: const Duration(seconds: 2),
       ),
     );
@@ -89,6 +102,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     setState(() {
       _notifications[index]['is_read'] = true;
       if (_unreadCount > 0) _unreadCount--;
+      if (_notifTabUnread > 0) _notifTabUnread--;
     });
     await AuthService.markNotificationAsRead(id);
   }
@@ -99,8 +113,81 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         n['is_read'] = true;
       }
       _unreadCount = 0;
+      _notifTabUnread = 0;
+      _supportTabUnread = 0;
     });
-    await AuthService.markAllNotificationsAsRead();
+    final res = await AuthService.markAllNotificationsAsRead();
+    if (mounted && res['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('সকল নোটিফিকেশন পড়া হিসেবে চিহ্নিত হয়েছে'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _clearAllNotifications() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.delete_sweep_rounded, color: Color(0xFFDC2626)),
+            SizedBox(width: 8),
+            Text('সব নোটিফিকেশন মুছবেন?'),
+          ],
+        ),
+        content: const Text(
+          'আপনি কি নিশ্চিত যে সমস্ত নোটিফিকেশন মুছে ফেলতে চান? এটি আর ফিরিয়ে আনা যাবে না।',
+          style: TextStyle(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('না, বাতিল', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('হ্যাঁ, মুছে ফেলুন'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      setState(() {
+        _notifications.clear();
+        _unreadCount = 0;
+        _notifTabUnread = 0;
+        _supportTabUnread = 0;
+      });
+      await AuthService.clearAllNotifications();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('সকল নোটিফিকেশন মুছে ফেলা হয়েছে')),
+        );
+      }
+    }
+  }
+
+  Future<void> _seedSampleNotifications() async {
+    setState(() => _isLoading = true);
+    final res = await AuthService.seedSampleNotifications();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['message'] ?? '১৩টি ক্যাটাগরির ডেমো নোটিফিকেশন তৈরি হয়েছে'),
+          backgroundColor: const Color(0xFF2563EB),
+        ),
+      );
+      _loadNotifications();
+    }
   }
 
   Future<void> _confirmRide(Map<String, dynamic> notif) async {
@@ -110,7 +197,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     });
 
     final result = await AuthService.confirmRideFromNotification(notifId);
-
     if (!mounted) return;
 
     setState(() {
@@ -118,7 +204,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     });
 
     if (result['success'] == true) {
-      // 1. AUTOMATICALLY DELETE / REMOVE FROM SCREEN IMMEDIATELY
       setState(() {
         _notifications.removeWhere((item) => item['id'] == notifId);
         if (_unreadCount > 0) _unreadCount--;
@@ -126,13 +211,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('রাইড কনফার্ম হয়েছে! নোটিফিকেশন স্বয়ংক্রিয়ভাবে মুছে ফেলা হয়েছে। (Ride Confirmed!)'),
-          backgroundColor: Colors.green,
+          content: Text('রাইড সফলভাবে গ্রহণ করা হয়েছে! (Ride Confirmed)'),
+          backgroundColor: Color(0xFF16A34A),
           duration: Duration(seconds: 2),
         ),
       );
 
-      // 2. Open ActiveRideScreen
       final rideData = result['data'] ?? notif['data'] ?? {};
       Navigator.push(
         context,
@@ -149,12 +233,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             },
           ),
         ),
-      ).then((_) {
-        // Reload notifications upon returning
-        _loadNotifications();
-      });
+      ).then((_) => _loadNotifications());
     } else {
-      // If ride is no longer available, remove stale notification
       if (result['auto_deleted'] == true) {
         setState(() {
           _notifications.removeWhere((item) => item['id'] == notifId);
@@ -163,7 +243,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(result['message'] ?? 'Could not confirm ride'),
+          content: Text(result['message'] ?? 'রাইড গ্রহণ করা সম্ভব হয়নি'),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -202,20 +282,37 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     await AuthService.deleteNotification(notifId);
   }
 
+  // Helper to map each of the 13 notification types to its distinct icon
   IconData _getIconForType(String? type) {
     switch (type) {
+      case 'new_ride_request':
       case 'ride_request':
         return Icons.directions_car_rounded;
-      case 'ride_confirmed':
       case 'ride_accepted':
-      case 'success':
+      case 'ride_confirmed':
         return Icons.check_circle_rounded;
-      case 'ride_cancelled':
-      case 'warning':
+      case 'passenger_cancelled':
         return Icons.cancel_rounded;
-      case 'promo':
-      case 'offer':
-        return Icons.local_offer_rounded;
+      case 'passenger_arrived':
+        return Icons.person_pin_circle_rounded;
+      case 'otp_notification':
+        return Icons.pin_rounded;
+      case 'ride_completed':
+        return Icons.flag_circle_rounded;
+      case 'payment_received':
+        return Icons.payments_rounded;
+      case 'subscription_expiry_reminder':
+        return Icons.card_membership_rounded;
+      case 'subscription_expired':
+        return Icons.timer_off_rounded;
+      case 'account_approved':
+        return Icons.verified_user_rounded;
+      case 'account_rejected':
+        return Icons.gpp_bad_rounded;
+      case 'app_update':
+        return Icons.system_update_rounded;
+      case 'admin_announcement':
+        return Icons.campaign_rounded;
       default:
         return Icons.notifications_rounded;
     }
@@ -223,38 +320,54 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Color _getColorForType(String? type) {
     switch (type) {
+      case 'new_ride_request':
       case 'ride_request':
-        return Colors.orange.shade800;
-      case 'ride_confirmed':
+        return const Color(0xFF2563EB); // Blue
       case 'ride_accepted':
-      case 'success':
-        return Colors.green;
-      case 'ride_cancelled':
-      case 'warning':
-        return Colors.red;
-      case 'promo':
-      case 'offer':
-        return Colors.deepPurple;
+      case 'ride_confirmed':
+      case 'ride_completed':
+        return const Color(0xFF16A34A); // Green
+      case 'passenger_cancelled':
+      case 'subscription_expired':
+      case 'account_rejected':
+        return const Color(0xFFDC2626); // Red
+      case 'passenger_arrived':
+        return const Color(0xFF0D9488); // Teal
+      case 'otp_notification':
+      case 'subscription_expiry_reminder':
+        return const Color(0xFFD97706); // Amber
+      case 'payment_received':
+        return const Color(0xFF059669); // Emerald
+      case 'account_approved':
+        return const Color(0xFF4F46E5); // Indigo
+      case 'app_update':
+        return const Color(0xFF7C3AED); // Purple
+      case 'admin_announcement':
+        return const Color(0xFFEA580C); // Orange
       default:
-        return Colors.blue;
+        return const Color(0xFF0F172A); // Slate
     }
   }
 
+  // --- Show Notification Details BottomSheet ---
   void _showNotificationDetails(Map<String, dynamic> notif) {
     final data = notif['data'] is Map ? notif['data'] as Map<String, dynamic> : <String, dynamic>{};
-    final bool isRideRequest = notif['type'] == 'ride_request';
+    final String type = notif['type'] ?? '';
+    final bool isRideRequest = type == 'ride_request' || type == 'new_ride_request';
+    final Color typeColor = _getColorForType(type);
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
         return Padding(
           padding: EdgeInsets.only(
-            left: 24.0,
-            right: 24.0,
+            left: 20.0,
+            right: 20.0,
             top: 24.0,
             bottom: MediaQuery.of(context).viewInsets.bottom + 24.0,
           ),
@@ -262,12 +375,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Header
               Row(
                 children: [
                   CircleAvatar(
-                    radius: 22,
-                    backgroundColor: _getColorForType(notif['type']).withValues(alpha: 0.12),
-                    child: Icon(_getIconForType(notif['type']), color: _getColorForType(notif['type']), size: 24),
+                    radius: 24,
+                    backgroundColor: typeColor.withValues(alpha: 0.12),
+                    child: Icon(_getIconForType(type), color: typeColor, size: 26),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -276,111 +390,141 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       children: [
                         Text(
                           notif['title'] ?? 'Notification',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                         ),
+                        const SizedBox(height: 2),
                         Text(
-                          notif['time'] ?? '',
-                          style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                          notif['time'] ?? 'Just now',
+                          style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
                         ),
                       ],
                     ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, color: Colors.grey),
+                    onPressed: () => Navigator.pop(context),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
               Text(
                 notif['message'] ?? '',
-                style: const TextStyle(fontSize: 15, height: 1.4, color: Colors.black87),
+                style: const TextStyle(fontSize: 14.5, height: 1.4, color: Colors.black87),
               ),
+
+              // Payload / Extra Details
               if (data.isNotEmpty) ...[
-                const Divider(height: 32),
+                const Divider(height: 28),
                 if (data['passenger_name'] != null)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
+                    padding: const EdgeInsets.only(bottom: 6.0),
                     child: Row(
                       children: [
-                        const Icon(Icons.person, size: 18, color: Colors.blueGrey),
+                        const Icon(Icons.person_rounded, size: 16, color: Colors.blueGrey),
                         const SizedBox(width: 8),
-                        Text('Passenger: ${data['passenger_name']}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                        Text('যাত্রী: ${data['passenger_name']}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
                         if (data['passenger_phone'] != null) ...[
-                          const SizedBox(width: 8),
-                          Text('(${data['passenger_phone']})', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                          const SizedBox(width: 6),
+                          Text('(${data['passenger_phone']})', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                         ],
                       ],
                     ),
                   ),
                 if (data['pickup'] != null)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
+                    padding: const EdgeInsets.only(bottom: 6.0),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.my_location, size: 18, color: Colors.green),
+                        const Icon(Icons.my_location_rounded, size: 16, color: Colors.green),
                         const SizedBox(width: 8),
-                        Expanded(child: Text('Pickup: ${data['pickup']}', style: const TextStyle(fontWeight: FontWeight.w500))),
+                        Expanded(child: Text('পিকআপ: ${data['pickup']}', style: const TextStyle(fontSize: 13))),
                       ],
                     ),
                   ),
                 if (data['dropoff'] != null)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
+                    padding: const EdgeInsets.only(bottom: 6.0),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.location_on, size: 18, color: Colors.red),
+                        const Icon(Icons.location_on_rounded, size: 16, color: Colors.red),
                         const SizedBox(width: 8),
-                        Expanded(child: Text('Dropoff: ${data['dropoff']}', style: const TextStyle(fontWeight: FontWeight.w500))),
+                        Expanded(child: Text('গন্তব্য: ${data['dropoff']}', style: const TextStyle(fontSize: 13))),
                       ],
                     ),
                   ),
-                if (data['fare'] != null)
+                if (data['fare'] != null || data['fare_formatted'] != null)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
+                    padding: const EdgeInsets.only(bottom: 6.0),
                     child: Row(
                       children: [
-                        const Icon(Icons.attach_money, size: 18, color: Colors.orange),
+                        const Icon(Icons.payments_rounded, size: 16, color: Colors.amber),
                         const SizedBox(width: 8),
-                        Text('Fare: ৳${data['fare']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green)),
+                        Text('ভাড়া: ${data['fare_formatted'] ?? '৳${data['fare']}'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF16A34A))),
+                        if (data['distance'] != null) ...[
+                          const SizedBox(width: 12),
+                          Text('• দূরত্ব: ${data['distance']}', style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+                        ],
                       ],
                     ),
                   ),
+                if (data['cancellation_fee_formatted'] != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6.0),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.monetization_on_rounded, size: 16, color: Colors.green),
+                        const SizedBox(width: 8),
+                        Text('ক্ষতিপূরণ জমা: ${data['cancellation_fee_formatted']}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                      ],
+                    ),
+                  ),
+                if (data['version'] != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6.0),
+                    child: Text('সংস্করণ: v${data['version']}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  ),
               ],
-              const SizedBox(height: 24),
+
+              const SizedBox(height: 20),
+
+              // Action Buttons
               if (isRideRequest)
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red,
-                          side: const BorderSide(color: Colors.red),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          foregroundColor: const Color(0xFFDC2626),
+                          side: const BorderSide(color: Color(0xFFDC2626)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                         onPressed: () {
                           Navigator.pop(context);
                           _rejectRide(notif);
                         },
-                        icon: const Icon(Icons.close_rounded, color: Colors.red, size: 20),
-                        label: const Text('Reject (বাতিল)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        label: const Text('REJECT (বাতিল)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
                       flex: 2,
                       child: ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
+                          backgroundColor: const Color(0xFF16A34A),
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                         onPressed: () {
                           Navigator.pop(context);
                           _confirmRide(notif);
                         },
-                        icon: const Icon(Icons.check_circle, color: Colors.white, size: 20),
-                        label: const Text('Accept (গ্রহণ করুন)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                        icon: const Icon(Icons.check_circle_rounded, size: 18),
+                        label: const Text('ACCEPT (গ্রহণ করুন)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                       ),
                     ),
                   ],
@@ -391,30 +535,30 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     Expanded(
                       child: OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red,
-                          side: const BorderSide(color: Colors.red),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          foregroundColor: const Color(0xFFDC2626),
+                          side: BorderSide(color: Colors.red.shade200),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                         onPressed: () {
                           Navigator.pop(context);
                           _deleteNotification(notif['id']);
                         },
                         icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                        label: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold)),
+                        label: const Text('Delete (মুছুন)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
+                          backgroundColor: const Color(0xFF0F172A),
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                         onPressed: () => Navigator.pop(context),
-                        child: const Text('Close', style: TextStyle(fontWeight: FontWeight.bold)),
+                        child: const Text('Close (বন্ধ করুন)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                       ),
                     ),
                   ],
@@ -426,102 +570,488 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  Widget _buildNotificationToggleCard() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: _notificationsEnabled ? Colors.white : const Color(0xFFFFF4F2),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: _notificationsEnabled ? Colors.grey.shade200 : const Color(0xFFFFCDD2),
-          width: 1.2,
+  // --- Help Dialog (Matching Uber Help Button) ---
+  void _showHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.help_outline_rounded, color: Color(0xFF2563EB)),
+            SizedBox(width: 8),
+            Text('সাহায্য ও সাপোর্ট (Help)'),
+          ],
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
+        content: const Text(
+          'নোটিফিকেশন বা রাইড সম্পর্কিত যেকোনো সহায়তার জন্য হেল্পলাইন ৯৯৯ অথবা আমাদের ড্রাইভার সাপোর্ট টিমের সাথে যোগাযোগ করুন।\n\n'
+          'জরুরি প্রয়োজনে:\n📞 হেল্পলাইন: 01700-000000\n✉️ ইমেইল: support@shadhinjatra.com',
+          style: TextStyle(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('ঠিক আছে', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(9),
-            decoration: BoxDecoration(
-              color: _notificationsEnabled ? Colors.orange.shade50 : Colors.red.shade100,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              _notificationsEnabled ? Icons.notifications_active_rounded : Icons.notifications_off_rounded,
-              color: _notificationsEnabled ? Colors.orange.shade800 : Colors.red.shade700,
-              size: 22,
+    );
+  }
+
+  // Filtered lists for Tabs
+  List<dynamic> _getTabList(int tabIndex) {
+    List<dynamic> list;
+    if (tabIndex == 0) {
+      // Tab 0: Notifications (Ride requests, cancellations, payments, account, OTP)
+      list = _notifications.where((n) {
+        final t = n['type'] ?? '';
+        return t != 'admin_announcement' && t != 'app_update';
+      }).toList();
+    } else {
+      // Tab 1: Support / Announcements
+      list = _notifications.where((n) {
+        final t = n['type'] ?? '';
+        return t == 'admin_announcement' || t == 'app_update';
+      }).toList();
+    }
+
+    // Secondary Chip Filter
+    if (_selectedFilter == 'rides') {
+      list = list.where((n) {
+        final t = n['type'] ?? '';
+        return t.contains('ride') || t.contains('passenger') || t == 'otp_notification' || t == 'payment_received';
+      }).toList();
+    } else if (_selectedFilter == 'system') {
+      list = list.where((n) {
+        final t = n['type'] ?? '';
+        return t.contains('subscription') || t.contains('account');
+      }).toList();
+    } else if (_selectedFilter == 'announcements') {
+      list = list.where((n) {
+        final t = n['type'] ?? '';
+        return t == 'admin_announcement' || t == 'app_update';
+      }).toList();
+    }
+
+    return list;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close_rounded, size: 24),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text(
+          'Inbox',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 22,
+            letterSpacing: -0.5,
+            color: Color(0xFF0F172A),
+          ),
+        ),
+        actions: [
+          // Uber-style Help Pill Button
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: OutlinedButton.icon(
+              onPressed: _showHelpDialog,
+              icon: const Icon(Icons.help_outline_rounded, size: 14, color: Color(0xFF0F172A)),
+              label: const Text('Help', style: TextStyle(color: Color(0xFF0F172A), fontSize: 12, fontWeight: FontWeight.bold)),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: Colors.grey.shade300),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          // Options Menu
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded, color: Color(0xFF0F172A)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            onSelected: (value) {
+              if (value == 'read_all') {
+                _markAllAsRead();
+              } else if (value == 'clear_all') {
+                _clearAllNotifications();
+              } else if (value == 'seed_demo') {
+                _seedSampleNotifications();
+              } else if (value == 'toggle') {
+                _toggleNotifications(!_notificationsEnabled);
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'read_all',
+                child: Row(
                   children: [
-                    Text(
-                      _notificationsEnabled ? 'নোটিফিকেশন চালু আছে' : 'নোটিফিকেশন বন্ধ (OFF)',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: _notificationsEnabled ? Colors.black87 : Colors.red.shade900,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: _notificationsEnabled ? Colors.green.shade100 : Colors.red.shade100,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        _notificationsEnabled ? 'ON' : 'OFF',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          color: _notificationsEnabled ? Colors.green.shade900 : Colors.red.shade900,
-                        ),
-                      ),
-                    ),
+                    Icon(Icons.done_all_rounded, size: 18, color: Color(0xFF2563EB)),
+                    SizedBox(width: 8),
+                    Text('সবগুলো পড়া হিসেবে মার্ক করুন'),
                   ],
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  _notificationsEnabled
-                      ? 'নতুন রাইড ও মেসেজের নোটিফিকেশন দেখানো হবে'
-                      : 'হোম পেজ নোটিফিকেশন অফ আছে, কোনো মেসেজ আসবে না',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: _notificationsEnabled ? Colors.grey.shade600 : Colors.red.shade800,
-                    height: 1.2,
+              ),
+              const PopupMenuItem(
+                value: 'clear_all',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_sweep_rounded, size: 18, color: Color(0xFFDC2626)),
+                    SizedBox(width: 8),
+                    Text('সব মুছে ফেলুন (Clear All)'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'seed_demo',
+                child: Row(
+                  children: [
+                    Icon(Icons.auto_awesome_rounded, size: 18, color: Color(0xFFD97706)),
+                    SizedBox(width: 8),
+                    Text('১৩টি ডেমো নোটিফিকেশন লোড করুন'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'toggle',
+                child: Row(
+                  children: [
+                    Icon(
+                      _notificationsEnabled ? Icons.notifications_off_rounded : Icons.notifications_active_rounded,
+                      size: 18,
+                      color: _notificationsEnabled ? Colors.grey : Colors.green,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(_notificationsEnabled ? 'নোটিফিকেশন বন্ধ করুন' : 'নোটিফিকেশন চালু করুন'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 6),
+        ],
+        // TabBar matching Uber Inbox (Notifications, Support)
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Column(
+            children: [
+              TabBar(
+                controller: _tabController,
+                indicatorColor: const Color(0xFF0F172A),
+                indicatorWeight: 3,
+                labelColor: const Color(0xFF0F172A),
+                unselectedLabelColor: Colors.grey.shade600,
+                labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                tabs: [
+                  Tab(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('Notifications'),
+                        if (_notifTabUnread > 0) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF2563EB),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Text(
+                              '$_notifTabUnread',
+                              style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
+                  Tab(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('Support / ঘোষণা'),
+                        if (_supportTabUnread > 0) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF2563EB),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Text(
+                              '$_supportTabUnread',
+                              style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              Divider(height: 1, color: Colors.grey.shade200),
+            ],
+          ),
+        ),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF0F172A)))
+          : !_notificationsEnabled
+              ? _buildOffStateView()
+              : RefreshIndicator(
+                  color: const Color(0xFF0F172A),
+                  onRefresh: _loadNotifications,
+                  child: Column(
+                    children: [
+                      // Filter Chips Row
+                      _buildFilterChipsRow(),
+                      // Tab Content with Active & Earlier sections
+                      Expanded(
+                        child: TabBarView(
+                          controller: _tabController,
+                          children: [
+                            _buildTabContent(0),
+                            _buildTabContent(1),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+    );
+  }
+
+  Widget _buildFilterChipsRow() {
+    final filters = [
+      {'key': 'all', 'label': 'সকল (All)'},
+      {'key': 'rides', 'label': 'রাইড (Rides)'},
+      {'key': 'system', 'label': 'সিস্টেম ও অ্যাকাউন্ট'},
+      {'key': 'announcements', 'label': 'ঘোষণা ও আপডেট'},
+    ];
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: filters.map((f) {
+            final isSelected = _selectedFilter == f['key'];
+            return Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: FilterChip(
+                label: Text(f['label']!),
+                selected: isSelected,
+                selectedColor: const Color(0xFF0F172A),
+                backgroundColor: const Color(0xFFF1F5F9),
+                labelStyle: TextStyle(
+                  color: isSelected ? Colors.white : const Color(0xFF334155),
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  fontSize: 12,
+                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                side: BorderSide.none,
+                visualDensity: VisualDensity.compact,
+                showCheckmark: false,
+                onSelected: (val) {
+                  setState(() => _selectedFilter = f['key']!);
+                },
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabContent(int tabIndex) {
+    final items = _getTabList(tabIndex);
+
+    if (items.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(height: MediaQuery.of(context).size.height * 0.2),
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.inbox_rounded, size: 56, color: Colors.grey.shade300),
+                const SizedBox(height: 12),
+                Text(
+                  'কোনো নোটিফিকেশন নেই',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'নতুন রাইড বা সিস্টেম বার্তা আসলে এখানে প্রদর্শিত হবে।',
+                  style: TextStyle(fontSize: 12.5, color: Colors.grey.shade500),
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: _seedSampleNotifications,
+                  icon: const Icon(Icons.add_rounded, size: 16),
+                  label: const Text('ডেমো নোটিফিকেশন লোড করুন', style: TextStyle(fontSize: 12)),
                 ),
               ],
             ),
           ),
-          if (_isToggling)
-            const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange),
-            )
-          else
-            Switch(
-              value: _notificationsEnabled,
-              onChanged: _toggleNotifications,
-              activeColor: Colors.white,
-              activeTrackColor: Colors.orange,
-              inactiveThumbColor: Colors.white,
-              inactiveTrackColor: Colors.grey.shade400,
-            ),
         ],
+      );
+    }
+
+    // Split into Active (Unread or Ride Requests) and Earlier
+    final activeItems = items.where((i) => i['is_read'] != true).toList();
+    final earlierItems = items.where((i) => i['is_read'] == true).toList();
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        if (activeItems.isNotEmpty) ...[
+          _buildSectionHeader('Active (${activeItems.length})'),
+          ...activeItems.map((item) => _buildUberNotificationTile(item)),
+        ],
+        if (earlierItems.isNotEmpty) ...[
+          _buildSectionHeader('Earlier (${earlierItems.length})'),
+          ...earlierItems.map((item) => _buildUberNotificationTile(item)),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontWeight: FontWeight.w800,
+          fontSize: 17,
+          color: Color(0xFF0F172A),
+          letterSpacing: -0.3,
+        ),
+      ),
+    );
+  }
+
+  // --- Uber Inbox Notification Tile (Matching media_1793797871205_1132af67.png) ---
+  Widget _buildUberNotificationTile(Map<String, dynamic> notif) {
+    final bool isUnread = notif['is_read'] != true;
+    final String type = notif['type'] ?? '';
+    final String title = notif['title'] ?? 'Notification';
+    final String message = notif['message'] ?? '';
+    final String time = notif['time'] ?? 'Just now';
+    final String actionTag = notif['action_tag'] ?? 'Info';
+    final Color typeColor = _getColorForType(type);
+
+    return InkWell(
+      onTap: () {
+        final index = _notifications.indexWhere((n) => n['id'] == notif['id']);
+        if (index != -1) _markAsRead(notif['id'], index);
+        _showNotificationDetails(notif);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: isUnread ? const Color(0xFFF8FAFC) : Colors.white,
+          border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Left Icon in Rounded Container
+            Container(
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(
+                color: typeColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(_getIconForType(type), color: typeColor, size: 20),
+            ),
+            const SizedBox(width: 14),
+            // Middle Content
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            fontWeight: isUnread ? FontWeight.w800 : FontWeight.w600,
+                            fontSize: 14.5,
+                            color: const Color(0xFF0F172A),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Time Ago (e.g. "2 min ago")
+                      Text(
+                        time,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isUnread ? const Color(0xFF2563EB) : Colors.grey.shade500,
+                          fontWeight: isUnread ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                      if (isUnread) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF2563EB),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  // Message Body
+                  Text(
+                    message,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: isUnread ? const Color(0xFF334155) : Colors.grey.shade600,
+                      height: 1.3,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 6),
+                  // Action Status Pill (e.g. "Awaiting response", "Action required", "Completed")
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: typeColor.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      actionTag,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: typeColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -530,7 +1060,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       children: [
-        const SizedBox(height: 50),
+        const SizedBox(height: 60),
         Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -541,31 +1071,31 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   color: Colors.red.shade50,
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.notifications_off_rounded, size: 68, color: Colors.red.shade400),
+                child: Icon(Icons.notifications_off_rounded, size: 60, color: Colors.red.shade400),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 16),
               const Text(
-                'হোম পেজ নোটিফিকেশন অফ আছে',
-                style: TextStyle(fontSize: 18, color: Colors.black87, fontWeight: FontWeight.bold),
+                'ড্রাইভার নোটিফিকেশন বন্ধ (OFF)',
+                style: TextStyle(fontSize: 18, color: Color(0xFF0F172A), fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 36),
+                padding: EdgeInsets.symmetric(horizontal: 40),
                 child: Text(
-                  'নোটিফিকেশন সার্ভিস বন্ধ থাকায় হোম পেজ ও নোটিফিকেশনে কোনো মেসেজ বা নতুন রাইড রিকোয়েস্ট আসবে না।',
+                  'নোটিফিকেশন সার্ভিস বন্ধ থাকায় কোনো নতুন রাইড বা সিস্টেম নোটিশ আসবে না।',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13, color: Colors.grey, height: 1.4),
                 ),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 20),
               ElevatedButton.icon(
                 onPressed: () => _toggleNotifications(true),
                 icon: const Icon(Icons.notifications_active_rounded, size: 18),
-                label: const Text('নোটিফিকেশন অন করুন', style: TextStyle(fontWeight: FontWeight.bold)),
+                label: const Text('নোটিফিকেশন চালু করুন', style: TextStyle(fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
+                  backgroundColor: const Color(0xFF0F172A),
                   foregroundColor: Colors.white,
-                  elevation: 2,
+                  elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                 ),
@@ -575,292 +1105,5 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ),
       ],
     );
-  }
-
-  Widget _buildEmptyView() {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      children: const [
-        SizedBox(height: 80),
-        Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.notifications_none_rounded, size: 72, color: Colors.grey),
-              SizedBox(height: 16),
-              Text('কোনো নতুন নোটিফিকেশন নেই', style: TextStyle(fontSize: 18, color: Colors.black54, fontWeight: FontWeight.w600)),
-              SizedBox(height: 6),
-              Text('নতুন রাইড রিকোয়েস্ট আসলে এখানে দেখা যাবে।', style: TextStyle(fontSize: 13, color: Colors.grey)),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF9F9FB),
-      appBar: AppBar(
-        title: const Text('Driver Notifications'),
-        backgroundColor: Colors.orange,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          if (_notificationsEnabled && _unreadCount > 0)
-            TextButton.icon(
-              onPressed: _markAllAsRead,
-              icon: const Icon(Icons.done_all, color: Colors.white, size: 18),
-              label: const Text('Read All', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.orange))
-          : RefreshIndicator(
-              color: Colors.orange,
-              onRefresh: _loadNotifications,
-              child: Column(
-                children: [
-                  _buildNotificationToggleCard(),
-                  Expanded(
-                    child: !_notificationsEnabled
-                        ? _buildOffStateView()
-                        : _notifications.isEmpty
-                            ? _buildEmptyView()
-                            : _buildNotificationList(),
-                  ),
-                ],
-              ),
-            ),
-    );
-  }
-
-  Widget _buildNotificationList() {
-    return ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      itemCount: _notifications.length,
-                      itemBuilder: (context, index) {
-                        final notif = _notifications[index];
-                        final bool isUnread = notif['is_read'] != true;
-                        final bool isRideRequest = notif['type'] == 'ride_request';
-                        final data = notif['data'] is Map ? notif['data'] as Map<String, dynamic> : <String, dynamic>{};
-                        final bool isConfirming = _confirmingIds.contains(notif['id']);
-
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          decoration: BoxDecoration(
-                            color: isUnread ? Colors.orange.shade50.withValues(alpha: 0.6) : Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: isUnread ? Colors.orange.shade300 : Colors.grey.shade200,
-                              width: isUnread ? 1.5 : 1,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.04),
-                                blurRadius: 8,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Notification Header Info
-                              ListTile(
-                                onTap: () {
-                                  _markAsRead(notif['id'], index);
-                                  _showNotificationDetails(notif);
-                                },
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                                leading: Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 22,
-                                      backgroundColor: _getColorForType(notif['type']).withValues(alpha: 0.12),
-                                      child: Icon(
-                                        _getIconForType(notif['type']),
-                                        color: _getColorForType(notif['type']),
-                                        size: 24,
-                                      ),
-                                    ),
-                                    if (isUnread)
-                                      Positioned(
-                                        top: -2,
-                                        right: -2,
-                                        child: Container(
-                                          width: 10,
-                                          height: 10,
-                                          decoration: BoxDecoration(
-                                            color: Colors.orange.shade800,
-                                            shape: BoxShape.circle,
-                                            border: Border.all(color: Colors.white, width: 2),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                                title: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        notif['title'] ?? '',
-                                        style: TextStyle(
-                                          fontWeight: isUnread ? FontWeight.w800 : FontWeight.w600,
-                                          fontSize: 15,
-                                          color: Colors.black87,
-                                        ),
-                                      ),
-                                    ),
-                                    Text(
-                                      notif['time'] ?? '',
-                                      style: TextStyle(fontSize: 11, color: isUnread ? Colors.orange.shade900 : Colors.grey.shade500, fontWeight: isUnread ? FontWeight.bold : FontWeight.normal),
-                                    ),
-                                  ],
-                                ),
-                                subtitle: Padding(
-                                  padding: const EdgeInsets.only(top: 4.0),
-                                  child: Text(
-                                    notif['message'] ?? '',
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: isUnread ? Colors.black87 : Colors.grey.shade700,
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                              // If it's a ride request, show location details and Confirm button right here!
-                              if (isRideRequest) ...[
-                                Container(
-                                  margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: Colors.grey.shade200),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      if (data['pickup'] != null)
-                                        Row(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            const Icon(Icons.my_location, size: 16, color: Colors.green),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Text(
-                                                'Pickup: ${data['pickup']}',
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      const SizedBox(height: 6),
-                                      if (data['dropoff'] != null)
-                                        Row(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            const Icon(Icons.location_on, size: 16, color: Colors.red),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Text(
-                                                'Destination: ${data['dropoff']}',
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      const Divider(height: 16),
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          if (data['fare'] != null)
-                                            Text(
-                                              'Fare: ৳${data['fare']}',
-                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.green),
-                                            )
-                                          else
-                                            const SizedBox(),
-                                          if (data['passenger_name'] != null)
-                                            Text(
-                                              'Passenger: ${data['passenger_name']}',
-                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
-                                            ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-
-                                // Confirmation Actions
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                  child: Row(
-                                    children: [
-                                      OutlinedButton.icon(
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: Colors.red.shade700,
-                                          side: BorderSide(color: Colors.red.shade300),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                                        ),
-                                        onPressed: (_confirmingIds.contains(notif['id']) || _rejectingIds.contains(notif['id']))
-                                            ? null
-                                            : () => _rejectRide(notif),
-                                        icon: _rejectingIds.contains(notif['id'])
-                                            ? const SizedBox(
-                                                width: 14,
-                                                height: 14,
-                                                child: CircularProgressIndicator(color: Colors.red, strokeWidth: 2),
-                                              )
-                                            : const Icon(Icons.close_rounded, size: 16, color: Colors.red),
-                                        label: const Text('REJECT (বাতিল)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: ElevatedButton.icon(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.green,
-                                            foregroundColor: Colors.white,
-                                            padding: const EdgeInsets.symmetric(vertical: 12),
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                            elevation: 1,
-                                          ),
-                                          onPressed: (_confirmingIds.contains(notif['id']) || _rejectingIds.contains(notif['id']))
-                                              ? null
-                                              : () => _confirmRide(notif),
-                                          icon: isConfirming
-                                              ? const SizedBox(
-                                                  width: 18,
-                                                  height: 18,
-                                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                                                )
-                                              : const Icon(Icons.check_circle_rounded, size: 20, color: Colors.white),
-                                          label: Text(
-                                            isConfirming ? 'Accepting...' : 'ACCEPT (গ্রহণ করুন)',
-                                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        );
-                      },
-                    );
   }
 }

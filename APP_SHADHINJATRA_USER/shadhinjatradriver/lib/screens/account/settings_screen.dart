@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:shadhinjatradriver/services/auth_service.dart';
+import 'package:shadhinjatradriver/screens/account/language_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -12,7 +12,7 @@ class SettingsScreen extends StatelessWidget {
     'ar': '🇸🇦 العربية — Arabic',
     'es': '🇪🇸 Español — Spanish',
     'fr': '🇫🇷 Français — French',
-    'zh': '🇨🇳 简体中文 — Chinese (Simplified)',
+    'zh': '🇨🇳 简体中文 — Chinese',
     'pt': '🇵🇹 Português — Portuguese',
     'ru': '🇷🇺 Русский — Russian',
     'id': '🇮🇩 Bahasa Indonesia — Indonesian',
@@ -20,51 +20,16 @@ class SettingsScreen extends StatelessWidget {
     'de': '🇩🇪 Deutsch — German',
   };
 
-  void _showLanguageBottomSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (BuildContext context) {
-        return Container(
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('language'.tr(), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 10),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: languages.length,
-                  itemBuilder: (context, index) {
-                    String code = languages.keys.elementAt(index);
-                    String name = languages.values.elementAt(index);
-                    return ListTile(
-                      title: Text(name),
-                      trailing: context.locale.languageCode == code ? const Icon(Icons.check, color: Colors.orange) : null,
-                      onTap: () async {
-                        await context.setLocale(Locale(code));
-                        await AuthService.updateLanguage(code);
-                        if (context.mounted) Navigator.pop(context);
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    String currentLang = languages[context.locale.languageCode] ?? 'English';
+    String currentLang = languages[context.locale.languageCode] ?? 'বাংলা (Bangla)';
 
     return Scaffold(
-      appBar: AppBar(title: Text('settings'.tr()), backgroundColor: Colors.orange, foregroundColor: Colors.white),
+      appBar: AppBar(
+        title: Text('settings'.tr()),
+        backgroundColor: Colors.orange,
+        foregroundColor: Colors.white,
+      ),
       body: ListView(
         children: [
           SwitchListTile(
@@ -80,15 +45,17 @@ class SettingsScreen extends StatelessWidget {
             activeColor: Colors.orange,
           ),
           ListTile(
-            title: Text('language'.tr()),
-            trailing: Text(currentLang),
-            onTap: () => _showLanguageBottomSheet(context),
-          ),
-          ListTile(
-            title: Text('change_password'.tr()),
+            leading: const Icon(Icons.language, color: Colors.orange),
+            title: Text('language_settings'.tr()),
+            subtitle: Text(currentLang),
             trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () {},
-          )
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const LanguageScreen()),
+              );
+            },
+          ),
         ],
       ),
     );

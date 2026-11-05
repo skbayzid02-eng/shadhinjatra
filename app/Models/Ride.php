@@ -114,4 +114,24 @@ class Ride extends Model
     {
         return $this->hasMany(DriverRideRejection::class, 'ride_id');
     }
+
+    public function getFareAttribute(): float
+    {
+        return (float) ($this->attributes['fare_amount'] ?? 0.0);
+    }
+
+    public function getDistanceAttribute(): float
+    {
+        return (float) ($this->attributes['distance_km'] ?? 0.0);
+    }
+
+    public function getPickupAddressAttribute(): string
+    {
+        return (string) ($this->attributes['pickup_location'] ?? '');
+    }
+
+    public function getDestinationAddressAttribute(): string
+    {
+        return (string) ($this->attributes['dropoff_location'] ?? '');
+    }
 }

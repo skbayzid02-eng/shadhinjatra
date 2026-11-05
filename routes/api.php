@@ -128,12 +128,15 @@ Route::middleware('auth:sanctum')->group(function () {
     
     // Driver Notification Endpoints
     Route::get('/driver/notifications', [\App\Http\Controllers\DriverNotificationController::class, 'index']);
+    Route::get('/driver/notifications/unread-count', [\App\Http\Controllers\DriverNotificationController::class, 'unreadCount']);
     Route::post('/driver/notifications/toggle', [\App\Http\Controllers\DriverNotificationController::class, 'toggleNotifications']);
     Route::post('/driver/notifications/{id}/confirm', [\App\Http\Controllers\DriverNotificationController::class, 'confirmRideFromNotification']);
     Route::post('/driver/notifications/{id}/accept', [\App\Http\Controllers\DriverNotificationController::class, 'confirmRideFromNotification']);
     Route::post('/driver/notifications/{id}/reject', [\App\Http\Controllers\DriverNotificationController::class, 'rejectRideFromNotification']);
     Route::post('/driver/notifications/{id}/read', [\App\Http\Controllers\DriverNotificationController::class, 'markAsRead']);
     Route::post('/driver/notifications/mark-read', [\App\Http\Controllers\DriverNotificationController::class, 'markAllAsRead']);
+    Route::delete('/driver/notifications/clear-all', [\App\Http\Controllers\DriverNotificationController::class, 'clearAll']);
+    Route::post('/driver/notifications/seed-samples', [\App\Http\Controllers\DriverNotificationController::class, 'seedSampleNotifications']);
     Route::delete('/driver/notifications/{id}', [\App\Http\Controllers\DriverNotificationController::class, 'destroy']);
     
     // Earnings & Payouts Endpoints
@@ -143,14 +146,45 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/driver/withdraw', [\App\Http\Controllers\DriverDashboardController::class, 'requestWithdrawal']);
     Route::get('/driver/withdrawals', [\App\Http\Controllers\DriverDashboardController::class, 'withdrawals']);
     Route::get('/driver/rides', [\App\Http\Controllers\DriverDashboardController::class, 'rides']);
-    Route::get('/driver/account', [\App\Http\Controllers\DriverDashboardController::class, 'account']);
-    
-    // Driver Account Sub-Endpoints
+    Route::get('/driver/rides/{id}', [\App\Http\Controllers\DriverDashboardController::class, 'rideDetails']);
+    // Driver Account Comprehensive Endpoints
+    Route::get('/driver/account', [\App\Http\Controllers\DriverAccountController::class, 'index']);
+    Route::put('/driver/account/profile', [\App\Http\Controllers\DriverAccountController::class, 'updateProfile']);
+    Route::post('/driver/account/profile', [\App\Http\Controllers\DriverAccountController::class, 'updateProfile']);
+    Route::post('/driver/account/avatar', [\App\Http\Controllers\DriverAccountController::class, 'uploadAvatar']);
     Route::get('/driver/account/vehicle', [\App\Http\Controllers\DriverAccountController::class, 'vehicle']);
     Route::post('/driver/account/vehicle', [\App\Http\Controllers\DriverAccountController::class, 'updateVehicle']);
     Route::put('/driver/account/vehicle', [\App\Http\Controllers\DriverAccountController::class, 'updateVehicle']);
     Route::get('/driver/account/documents', [\App\Http\Controllers\DriverAccountController::class, 'documents']);
+    Route::post('/driver/account/documents', [\App\Http\Controllers\DriverAccountController::class, 'updateDocuments']);
+    Route::get('/driver/account/ratings', [\App\Http\Controllers\DriverAccountController::class, 'ratings']);
+    Route::get('/driver/account/payments', [\App\Http\Controllers\DriverAccountController::class, 'payments']);
+    Route::post('/driver/account/settings', [\App\Http\Controllers\DriverAccountController::class, 'updateSettings']);
+    Route::put('/driver/account/settings', [\App\Http\Controllers\DriverAccountController::class, 'updateSettings']);
+    Route::post('/driver/account/change-password', [\App\Http\Controllers\DriverAccountController::class, 'changePassword']);
+    Route::get('/driver/account/legal', [\App\Http\Controllers\DriverAccountController::class, 'legal']);
     Route::get('/driver/account/subscription', [\App\Http\Controllers\DriverAccountController::class, 'subscription']);
+    Route::get('/driver/account/language', [\App\Http\Controllers\DriverAccountController::class, 'languages']);
+    Route::post('/driver/account/language', [\App\Http\Controllers\DriverAccountController::class, 'updateLanguage']);
+    Route::put('/driver/account/language', [\App\Http\Controllers\DriverAccountController::class, 'updateLanguage']);
+
+    // Driver Safety & Emergency Comprehensive Endpoints
+    Route::post('/driver/safety/sos', [\App\Http\Controllers\DriverSafetyController::class, 'triggerSos']);
+    Route::get('/driver/safety/emergency-contact', [\App\Http\Controllers\DriverSafetyController::class, 'emergencyContact']);
+    Route::post('/driver/safety/emergency-contact', [\App\Http\Controllers\DriverSafetyController::class, 'updateEmergencyContact']);
+    Route::put('/driver/safety/emergency-contact', [\App\Http\Controllers\DriverSafetyController::class, 'updateEmergencyContact']);
+    Route::post('/driver/safety/emergency-contact/alert', [\App\Http\Controllers\DriverSafetyController::class, 'alertEmergencyContact']);
+    Route::post('/driver/safety/share-location', [\App\Http\Controllers\DriverSafetyController::class, 'shareLiveLocation']);
+    Route::post('/driver/safety/report-passenger', [\App\Http\Controllers\DriverSafetyController::class, 'reportPassenger']);
+    Route::post('/driver/safety/report-issue', [\App\Http\Controllers\DriverSafetyController::class, 'reportSafetyIssue']);
+    Route::get('/driver/safety/hotlines', [\App\Http\Controllers\DriverSafetyController::class, 'hotlines']);
+    
+    // Driver Background System, Foreground Location & Auto-Offline Endpoints
+    Route::post('/driver/background/heartbeat', [\App\Http\Controllers\DriverBackgroundController::class, 'heartbeat']);
+    Route::get('/driver/background/status', [\App\Http\Controllers\DriverBackgroundController::class, 'status']);
+    Route::post('/driver/background/offline', [\App\Http\Controllers\DriverBackgroundController::class, 'setOffline']);
+    Route::post('/driver/device-token', [\App\Http\Controllers\DriverBackgroundController::class, 'updateDeviceToken']);
+    Route::post('/driver/fcm-token', [\App\Http\Controllers\DriverBackgroundController::class, 'updateDeviceToken']);
     
     // Mandatory Driver Monthly Subscription Endpoints
     Route::get('/subscription/status', [\App\Http\Controllers\SubscriptionController::class, 'status']);
@@ -168,6 +202,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/driver/chats/{id}', [\App\Http\Controllers\DriverChatController::class, 'show']);
     Route::get('/driver/chats/{id}/new-messages', [\App\Http\Controllers\DriverChatController::class, 'fetchNewMessages']);
     Route::post('/driver/chats/{id}/send', [\App\Http\Controllers\DriverChatController::class, 'sendMessage']);
+    Route::delete('/driver/chats/messages/{id}', [\App\Http\Controllers\DriverChatController::class, 'deleteMessage']);
+    Route::delete('/driver/chats/{id}/clear', [\App\Http\Controllers\DriverChatController::class, 'clearChat']);
+    Route::post('/driver/chats/{id}/clear', [\App\Http\Controllers\DriverChatController::class, 'clearChat']);
     
     // Promotions & Commission
     Route::get('/promotions', [\App\Http\Controllers\Api\PromotionController::class, 'index']);
@@ -184,6 +221,8 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::get('/map/geocode', [\App\Http\Controllers\MapController::class, 'geocode']);
 Route::get('/map/route', [\App\Http\Controllers\MapController::class, 'route']);
 Route::get('/map/nearby-drivers', [\App\Http\Controllers\Api\RideController::class, 'nearbyDrivers']);
+Route::get('/languages', [\App\Http\Controllers\DriverAccountController::class, 'languages']);
+Route::get('/track/{token}', [\App\Http\Controllers\DriverSafetyController::class, 'viewTrackLocation']);
 
 // Dynamic Vehicle Categories & Real-time Fare Calculation API
 Route::get('/vehicles', [\App\Http\Controllers\Api\VehicleCategoryController::class, 'index']);

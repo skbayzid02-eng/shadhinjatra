@@ -44,6 +44,7 @@ class _MainNavigationState extends State<MainNavigation> {
         String? token = await messaging.getToken();
         if (token != null) {
           AuthService.updateFcmToken(token);
+          AuthService.registerDeviceToken(token);
         }
         
         FirebaseMessaging.onMessage.listen((RemoteMessage message) {

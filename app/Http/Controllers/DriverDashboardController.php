@@ -337,19 +337,123 @@ class DriverDashboardController extends Controller
         ]);
     }
 
+    public function formatRideForDriver(\App\Models\Ride $ride): array
+    {
+        $p = $ride->passenger ?? $ride->user;
+        $fare = (float) $ride->fare_amount;
+        $comm = (float) ($ride->commission_amount ?? round($fare * 0.10, 2));
+        $net = (float) ($ride->driver_earnings ?? max(0, $fare - $comm));
+
+        $statusTag = match ($ride->status) {
+            'pending' => 'Upcoming',
+            'accepted', 'arrived', 'started', 'ongoing' => 'Active',
+            'completed' => 'Completed',
+            'cancelled' => 'Cancelled',
+            default => ucfirst($ride->status),
+        };
+
+        $statusLabel = match ($ride->status) {
+            'pending' => 'Upcoming (অপেক্ষমান)',
+            'accepted' => 'Active (গৃহীত)',
+            'arrived' => 'Active (পিকআপে উপস্থিত)',
+            'started', 'ongoing' => 'Active (চলমান যাত্রা)',
+            'completed' => 'Completed (সম্পন্ন)',
+            'cancelled' => 'Cancelled (বাতিল)',
+            default => ucfirst($ride->status),
+        };
+
+        $statusColor = match ($ride->status) {
+            'pending' => '#F59E0B',
+            'accepted', 'arrived', 'started', 'ongoing' => '#EA580C',
+            'completed' => '#16A34A',
+            'cancelled' => '#DC2626',
+            default => '#6B7280',
+        };
+
+        $paymentMethodFormatted = match (strtolower($ride->payment_method ?? 'cash')) {
+            'cash' => 'Cash',
+            'bkash' => 'bKash',
+            'nagad' => 'Nagad',
+            'rocket' => 'Rocket',
+            'wallet' => 'Wallet',
+            'card' => 'Credit Card',
+            default => ucfirst($ride->payment_method ?? 'Cash'),
+        };
+
+        $avatarUrl = null;
+        if ($p && $p->avatar) {
+            $avatarUrl = str_starts_with($p->avatar, 'http') ? $p->avatar : asset('storage/' . $p->avatar);
+        }
+
+        return [
+            'id' => $ride->id,
+            'ride_id' => '#' . $ride->id,
+            'ride_code' => 'RD-' . str_pad($ride->id, 5, '0', STR_PAD_LEFT),
+            'status' => $ride->status,
+            'status_tag' => $statusTag,
+            'status_label' => $statusLabel,
+            'status_color' => $statusColor,
+            'vehicle_type' => $ride->vehicle_type ?? 'Private Car',
+            'date_time' => $ride->created_at ? $ride->created_at->format('d M Y, h:i A') : 'এখন',
+            'date' => $ride->created_at ? $ride->created_at->diffForHumans() : 'এখন',
+            'formatted_date' => $ride->created_at ? $ride->created_at->format('d M Y, h:i A') : '',
+            'completed_date' => $ride->completed_at ? \Carbon\Carbon::parse($ride->completed_at)->format('d M Y, h:i A') : ($ride->updated_at ? $ride->updated_at->format('d M Y, h:i A') : ''),
+            'pickup_address' => $ride->pickup_location ?? 'পিকআপ স্থান',
+            'pickup' => $ride->pickup_location ?? 'পিকআপ স্থান',
+            'pickup_lat' => (float) $ride->pickup_lat,
+            'pickup_lng' => (float) ($ride->pickup_lng ?? $ride->pickup_lon ?? 0),
+            'destination' => $ride->dropoff_location ?? 'গন্তব্য স্থান',
+            'dropoff' => $ride->dropoff_location ?? 'গন্তব্য স্থান',
+            'dropoff_lat' => (float) $ride->dropoff_lat,
+            'dropoff_lng' => (float) ($ride->dropoff_lng ?? $ride->dropoff_lon ?? 0),
+            'distance' => round((float) ($ride->distance_km ?? 0), 1) . ' km',
+            'distance_km' => (float) ($ride->distance_km ?? 0),
+            'fare' => '৳' . number_format($fare, 2),
+            'fare_amount' => $fare,
+            'base_fare' => (float) ($ride->base_fare ?? 0),
+            'distance_fare' => (float) ($ride->distance_fare ?? 0),
+            'time_fare' => (float) ($ride->time_fare ?? 0),
+            'additional_charges' => (float) ($ride->additional_charges ?? 0),
+            'commission_amount' => $comm,
+            'driver_earnings' => $net,
+            'payment_method' => $paymentMethodFormatted,
+            'payment_method_raw' => $ride->payment_method ?? 'cash',
+            'payment_status' => $ride->payment_status ?? 'pending',
+            'otp' => in_array($ride->status, ['pending', 'accepted', 'arrived']) ? $ride->otp : null,
+            'cancellation_reason' => $ride->cancellation_reason,
+            'cancelled_by' => $ride->cancelled_by,
+            'cancellation_fee' => (float) ($ride->cancellation_fee ?? 0),
+            'rating' => (float) ($ride->rating ?? 0),
+            'feedback' => $ride->feedback,
+            'passenger_name' => $p ? $p->name : 'যাত্রী (Guest Passenger)',
+            'passenger_phone' => $p ? ($p->phone ?? 'ফোন নম্বর নেই') : 'ফোন নম্বর নেই',
+            'passenger_rating' => (float) ($p?->rating ?? 4.8),
+            'passenger_avatar' => $avatarUrl,
+            'timeline' => [
+                'created_at' => $ride->created_at ? $ride->created_at->format('d M Y, h:i A') : null,
+                'accepted_at' => $ride->accepted_at ? \Carbon\Carbon::parse($ride->accepted_at)->format('d M Y, h:i A') : null,
+                'arrived_at' => $ride->arrived_at ? \Carbon\Carbon::parse($ride->arrived_at)->format('d M Y, h:i A') : null,
+                'started_at' => $ride->started_at ? \Carbon\Carbon::parse($ride->started_at)->format('d M Y, h:i A') : null,
+                'completed_at' => $ride->completed_at ? \Carbon\Carbon::parse($ride->completed_at)->format('d M Y, h:i A') : null,
+            ],
+        ];
+    }
+
     public function rides(Request $request)
     {
         $user = $request->user();
-        $statusFilter = $request->query('status'); // optional: pending, accepted, active, completed, cancelled, all
 
-        // 1. Pending Rides (Available ride requests for this driver)
+        // 1. Pending Rides (Available ride requests dispatched to this driver)
         $rejectedRideIds = \App\Models\DriverRideRejection::where('driver_id', $user->id)->pluck('ride_id')->toArray();
         
+        $dispatchService = app(\App\Services\RideDispatchService::class);
+        $compatibleVehicleTypes = $dispatchService->getCompatibleVehicleTypes($user->vehicle_type ?? 'Private Car');
+
         $pendingQuery = \App\Models\Ride::with(['passenger', 'user'])
             ->where('status', 'pending')
             ->whereNotIn('id', $rejectedRideIds)
-            ->where(function ($q) use ($user) {
-                $q->where('vehicle_type', $user->vehicle_type ?? 'Private Car')
+            ->where(function ($q) use ($user, $compatibleVehicleTypes) {
+                $q->whereIn('vehicle_type', $compatibleVehicleTypes)
                   ->orWhere('dispatched_driver_id', $user->id)
                   ->orWhereJsonContains('dispatched_driver_ids', $user->id);
             })
@@ -380,91 +484,82 @@ class DriverDashboardController extends Controller
             ->where('status', 'cancelled')
             ->orderBy('updated_at', 'desc');
 
-        // Formatter for rich frontend display
-        $formatter = function ($ride) {
-            $p = $ride->passenger ?? $ride->user;
-            $fare = (float) $ride->fare_amount;
-            $comm = (float) ($ride->commission_amount ?? round($fare * 0.10, 2));
-            $net = (float) ($ride->driver_earnings ?? max(0, $fare - $comm));
+        $pending = $pendingQuery->get()->map(fn ($r) => $this->formatRideForDriver($r))->values();
+        $accepted = $acceptedQuery->get()->map(fn ($r) => $this->formatRideForDriver($r))->values();
+        $active = $activeQuery->get()->map(fn ($r) => $this->formatRideForDriver($r))->values();
+        $completed = $completedQuery->get()->map(fn ($r) => $this->formatRideForDriver($r))->values();
+        $cancelled = $cancelledQuery->get()->map(fn ($r) => $this->formatRideForDriver($r))->values();
 
-            $statusLabel = match ($ride->status) {
-                'pending' => 'অপেক্ষমান (Pending)',
-                'accepted' => 'গৃহীত (Accepted)',
-                'arrived' => 'ড্রাইভার উপস্থিত (Arrived)',
-                'started' => 'ট্রিপ শুরু হয়েছে (Started)',
-                'ongoing' => 'চলমান (Ongoing)',
-                'completed' => 'সম্পন্ন (Completed)',
-                'cancelled' => 'বাতিল (Cancelled)',
-                default => ucfirst($ride->status),
-            };
+        // 4 Specific Tabs
+        // Tab 2: Upcoming / Active (combines pending dispatched + accepted + active/ongoing)
+        $upcomingActive = $pending->concat($accepted)->concat($active)->values();
 
-            return [
-                'id' => $ride->id,
-                'status' => $ride->status,
-                'status_label' => $statusLabel,
-                'vehicle_type' => $ride->vehicle_type ?? 'Private Car',
-                'date' => $ride->created_at ? $ride->created_at->diffForHumans() : 'এখন',
-                'formatted_date' => $ride->created_at ? $ride->created_at->format('d M Y, h:i A') : '',
-                'completed_date' => $ride->completed_at ? $ride->completed_at->format('d M Y, h:i A') : ($ride->updated_at ? $ride->updated_at->format('d M Y, h:i A') : ''),
-                'pickup' => $ride->pickup_location ?? 'পিকআপ স্থান',
-                'pickup_lat' => (float) $ride->pickup_lat,
-                'pickup_lng' => (float) ($ride->pickup_lng ?? $ride->pickup_lon ?? 0),
-                'dropoff' => $ride->dropoff_location ?? 'গন্তব্য স্থান',
-                'dropoff_lat' => (float) $ride->dropoff_lat,
-                'dropoff_lng' => (float) ($ride->dropoff_lng ?? $ride->dropoff_lon ?? 0),
-                'fare' => '৳' . round($fare, 2),
-                'fare_amount' => $fare,
-                'driver_earnings' => $net,
-                'commission_amount' => $comm,
-                'distance_km' => (float) ($ride->distance_km ?? 0),
-                'payment_method' => $ride->payment_method ?? 'cash',
-                'payment_status' => $ride->payment_status ?? 'pending',
-                'otp' => in_array($ride->status, ['accepted', 'arrived']) ? $ride->otp : null,
-                'cancellation_reason' => $ride->cancellation_reason,
-                'cancelled_by' => $ride->cancelled_by,
-                'cancellation_fee' => (float) ($ride->cancellation_fee ?? 0),
-                'passenger_name' => $p ? $p->name : 'যাত্রী (Guest Passenger)',
-                'passenger_phone' => $p ? ($p->phone ?? 'ফোন নম্বর নেই') : 'ফোন নম্বর নেই',
-                'passenger_rating' => (float) ($p?->rating ?? 4.8),
-                'passenger_avatar' => ($p && $p->avatar) ? asset('storage/' . $p->avatar) : null,
-            ];
-        };
-
-        $pending = $pendingQuery->get()->map($formatter)->values();
-        $accepted = $acceptedQuery->get()->map($formatter)->values();
-        $active = $activeQuery->get()->map($formatter)->values();
-        $completed = $completedQuery->get()->map($formatter)->values();
-        $cancelled = $cancelledQuery->get()->map($formatter)->values();
-
-        // Backwards compatibility mappings:
-        $ongoing = $accepted->concat($active)->values();
-        $history = $completed->concat($cancelled)->values();
+        // Tab 1: All Rides (combines all driver's rides + pending dispatched)
+        $allRides = $upcomingActive->concat($completed)->concat($cancelled)->values();
 
         $counts = [
+            'all' => $allRides->count(),
+            'upcoming_active' => $upcomingActive->count(),
+            'completed' => $completed->count(),
+            'cancelled' => $cancelled->count(),
+            // Legacy counts
             'pending' => $pending->count(),
             'accepted' => $accepted->count(),
             'active' => $active->count(),
-            'completed' => $completed->count(),
-            'cancelled' => $cancelled->count(),
-            'total' => $pending->count() + $accepted->count() + $active->count() + $completed->count() + $cancelled->count(),
+            'total' => $allRides->count(),
         ];
 
         return response()->json([
             'success' => true,
             'data' => [
-                'pending' => $pending,
-                'accepted' => $accepted,
-                'active' => $active,
+                // 4 Tabs
+                'all_rides' => $allRides,
+                'upcoming_active' => $upcomingActive,
                 'completed' => $completed,
                 'cancelled' => $cancelled,
                 'counts' => $counts,
-                // Backwards compatibility keys
+                // Legacy & helper aliases
+                'all' => $allRides,
+                'upcoming' => $pending,
+                'pending' => $pending,
+                'accepted' => $accepted,
+                'active' => $active,
                 'requests' => $pending,
-                'ongoing' => $ongoing,
-                'history' => $history,
-                'total_rides' => $counts['total'],
+                'ongoing' => $accepted->concat($active)->values(),
+                'history' => $completed->concat($cancelled)->values(),
+                'total_rides' => $counts['all'],
             ],
             'message' => 'Rides fetched successfully'
+        ]);
+    }
+
+    public function rideDetails(Request $request, $id)
+    {
+        $user = $request->user();
+        $ride = \App\Models\Ride::with(['passenger', 'user'])->find($id);
+
+        if (!$ride) {
+            return response()->json([
+                'success' => false,
+                'message' => 'রাইড পাওয়া যায়নি (Ride not found)',
+            ], 404);
+        }
+
+        $isAuthorized = ($ride->driver_id === $user->id) ||
+                        ($ride->dispatched_driver_id === $user->id) ||
+                        (is_array($ride->dispatched_driver_ids) && in_array($user->id, $ride->dispatched_driver_ids));
+
+        if (!$isAuthorized) {
+            return response()->json([
+                'success' => false,
+                'message' => 'অননুমোদিত অ্যাক্সেস (Unauthorized access to this ride)',
+            ], 403);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->formatRideForDriver($ride),
+            'message' => 'রাইডের সম্পূর্ণ বিবরণ লোড হয়েছে',
         ]);
     }
 

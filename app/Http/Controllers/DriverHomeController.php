@@ -183,7 +183,7 @@ class DriverHomeController extends Controller
                 'active_ride' => $activeRide,
                 'has_ongoing_ride' => ($activeRide !== null),
                 'unread_notifications_count' => ($user->push_notifications ?? true) 
-                    ? Notification::where('user_id', $user->id)->where('type', '!=', 'ride_request')->where('is_read', false)->count() 
+                    ? Notification::where('user_id', $user->id)->where('is_read', false)->count() 
                     : 0,
             ],
             'message' => 'Driver home data fetched successfully',

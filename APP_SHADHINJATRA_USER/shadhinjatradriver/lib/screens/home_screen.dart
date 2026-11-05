@@ -13,6 +13,8 @@ import 'package:shadhinjatradriver/screens/notifications_screen.dart';
 import 'package:shadhinjatradriver/screens/earnings_screen.dart';
 import 'package:shadhinjatradriver/screens/account/subscription_screen.dart';
 import 'package:shadhinjatradriver/screens/account/documents_screen.dart';
+import 'package:shadhinjatradriver/screens/account/emergency_sos_screen.dart';
+import 'package:shadhinjatradriver/services/driver_background_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -65,6 +67,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    DriverBackgroundService.instance.initialize();
+    DriverBackgroundService.instance.addListener(_onBackgroundServiceUpdate);
+    DriverBackgroundService.instance.onNewRideAlert = (alert) {
+      if (mounted) {
+        _showIncomingRideModal(alert);
+      }
+    };
+    DriverBackgroundService.instance.onConnectionStatusChanged = (isLost) {
+      if (mounted) {
+        setState(() => _isNetworkDisconnected = isLost);
+      }
+    };
+    DriverBackgroundService.instance.onOnlineStatusChanged = (isOnline) {
+      if (mounted) {
+        setState(() => _isOnline = isOnline);
+      }
+    };
     _checkLocationPermissionStatus();
     _initMapPosition();
     _startNearbyDriversTimer();
@@ -72,6 +91,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _loadStats();
     _startRequestsPolling();
     _checkAutoOnlineOnStartup();
+  }
+
+  void _onBackgroundServiceUpdate() {
+    if (!mounted) return;
+    final bgService = DriverBackgroundService.instance;
+    if (_isNetworkDisconnected != bgService.isConnectionLost) {
+      setState(() => _isNetworkDisconnected = bgService.isConnectionLost);
+    }
   }
 
   Future<void> _checkLocationPermissionStatus() async {
@@ -213,6 +240,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _durationTimer?.cancel();
     _heartbeatTimer?.cancel();
     _nearbyDriversTimer?.cancel();
+    DriverBackgroundService.instance.removeListener(_onBackgroundServiceUpdate);
     super.dispose();
   }
 
@@ -500,6 +528,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (res['success'] == true) {
       await AuthService.setLocalOnlinePreference(true);
+      await DriverBackgroundService.instance.startTracking(isOnline: true);
       if (!mounted) return;
       setState(() {
         _isOnline = true;
@@ -612,6 +641,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _stopActiveTimers();
     _requestsPollingTimer?.cancel();
     await AuthService.setLocalOnlinePreference(false);
+    await DriverBackgroundService.instance.stopTracking();
     
     setState(() {
       _isOnline = false;
@@ -865,6 +895,74 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _buildBackgroundStatusPill() {
+    final bgService = DriverBackgroundService.instance;
+    if (!_isOnline || !bgService.isRunning) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0FDF4),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF86EFAC)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x0F000000), blurRadius: 4, offset: Offset(0, 2)),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              color: Color(0xFF16A34A),
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          const Text(
+            'ব্যাকগ্রাউন্ড ট্র্যাকিং ও ফোরগ্রাউন্ড সার্ভিস সক্রিয়',
+            style: TextStyle(color: Color(0xFF166534), fontSize: 11, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPermissionWarningBanner() {
+    final bgService = DriverBackgroundService.instance;
+    if (bgService.isLocationPermissionGranted && bgService.isGpsEnabled) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 6, bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEA580C),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.location_off_rounded, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'লোকেশন সার্ভিস বা পারমিশন বন্ধ! লাইভ রাইড নিশ্চিত করা যাবে না।',
+              style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Geolocator.openLocationSettings(),
+            child: const Text('চালু করুন', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _formatLastGpsTime() {
     if (_lastGpsUpdateTime == null) return 'অপেক্ষমান...';
     final diff = DateTime.now().difference(_lastGpsUpdateTime!).inSeconds;
@@ -934,6 +1032,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             _buildTopBar(driver, isSubActive, subText),
+                            _buildBackgroundStatusPill(),
                             if (_isNetworkDisconnected) ...[
                               const SizedBox(height: 8),
                               Padding(
@@ -941,6 +1040,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 child: _buildNetworkDisconnectedBanner(),
                               ),
                             ],
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 14),
+                              child: _buildPermissionWarningBanner(),
+                            ),
                           ],
                         ),
                       ),
@@ -1250,6 +1353,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
             ],
+          ),
+        ),
+
+        // Safety & Emergency Shield Button on Left Side (matches reference UI)
+        Positioned(
+          left: 14,
+          bottom: 240,
+          child: Material(
+            elevation: 4,
+            shape: const CircleBorder(),
+            color: Colors.white,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const EmergencySosScreen()),
+              ),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFF2563EB).withValues(alpha: 0.25), width: 1.5),
+                ),
+                child: const Icon(Icons.shield_rounded, color: Color(0xFF2563EB), size: 24),
+              ),
+            ),
           ),
         ),
       ],
@@ -2695,7 +2824,13 @@ class _RideRequestCardState extends State<RideRequestCard> with SingleTickerProv
 
   IconData _getVehicleIcon(String? type) {
     final t = (type ?? '').toLowerCase();
-    if (t.contains('bike') || t.contains('motor') || t.contains('বাইক')) {
+    if (t.contains('easy') || t.contains('battery') || t.contains('ইজি')) {
+      return Icons.electric_moped_rounded;
+    }
+    if (t.contains('cargo') || t.contains('pickup') || t.contains('truck') || t.contains('কার্গো')) {
+      return Icons.local_shipping_rounded;
+    }
+    if (t.contains('bike') || t.contains('motor') || t.contains('বাইক') || t.contains('মোটর')) {
       return Icons.two_wheeler_rounded;
     }
     if (t.contains('cng') || t.contains('auto') || t.contains('সিএনজি')) {
@@ -2704,7 +2839,7 @@ class _RideRequestCardState extends State<RideRequestCard> with SingleTickerProv
     if (t.contains('rickshaw') || t.contains('রিকশা')) {
       return Icons.pedal_bike_rounded;
     }
-    if (t.contains('micro') || t.contains('hiace') || t.contains('মাইক্রো')) {
+    if (t.contains('micro') || t.contains('hiace') || t.contains('noah') || t.contains('মাইক্রো')) {
       return Icons.airport_shuttle_rounded;
     }
     return Icons.directions_car_filled_rounded;
@@ -2712,16 +2847,25 @@ class _RideRequestCardState extends State<RideRequestCard> with SingleTickerProv
 
   Color _getVehicleColor(String? type) {
     final t = (type ?? '').toLowerCase();
-    if (t.contains('bike') || t.contains('motor') || t.contains('বাইক')) {
-      return const Color(0xFFEA580C);
+    if (t.contains('easy') || t.contains('battery') || t.contains('ইজি')) {
+      return const Color(0xFF0891B2); // Cyan
+    }
+    if (t.contains('cargo') || t.contains('pickup') || t.contains('truck') || t.contains('কার্গো')) {
+      return const Color(0xFFC2410C); // Deep Orange / Brown
+    }
+    if (t.contains('bike') || t.contains('motor') || t.contains('বাইক') || t.contains('মোটর')) {
+      return const Color(0xFFEA580C); // Orange
     }
     if (t.contains('cng') || t.contains('auto') || t.contains('সিএনজি')) {
-      return const Color(0xFF0D9488);
+      return const Color(0xFF0D9488); // Teal
     }
     if (t.contains('rickshaw') || t.contains('রিকশা')) {
-      return const Color(0xFF9333EA);
+      return const Color(0xFF9333EA); // Purple
     }
-    return const Color(0xFF2563EB);
+    if (t.contains('micro') || t.contains('hiace') || t.contains('noah') || t.contains('মাইক্রো')) {
+      return const Color(0xFF4F46E5); // Indigo
+    }
+    return const Color(0xFF2563EB); // Blue
   }
 
   Widget _buildCircularTimer() {

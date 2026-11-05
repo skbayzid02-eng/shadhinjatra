@@ -51,6 +51,11 @@ class AuthService {
 
   static const String userAgent = 'ShadhinJatraDriver/1.0';
 
+  static Future<String?> getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('auth_token');
+  }
+
   static Future<Map<String, String>> getHeaders() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
@@ -672,14 +677,14 @@ class AuthService {
     }
   }
 
-  static Future<void> updateLanguage(String languageCode) async {
+  static Future<Map<String, dynamic>> updateLanguage(String languageCode) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
-    if (token == null) return;
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
 
     try {
-      await http.post(
-        Uri.parse('$baseUrl/account/language'),
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/account/language'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -687,8 +692,20 @@ class AuthService {
         },
         body: jsonEncode({'language': languageCode}),
       );
+      return jsonDecode(response.body);
     } catch (e) {
       debugPrint("Failed to update language: $e");
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchLanguages() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/driver/account/language'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
     }
   }
 
@@ -711,14 +728,17 @@ class AuthService {
       return {'success': false, 'message': 'Network error'};
     }
   }
-  static Future<Map<String, dynamic>> fetchNotifications() async {
+  static Future<Map<String, dynamic>> fetchNotifications({String? category}) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     if (token == null) return {'success': false, 'message': 'Not logged in'};
 
     try {
+      final uri = category != null && category.isNotEmpty && category != 'all'
+          ? Uri.parse('$baseUrl/driver/notifications?category=$category')
+          : Uri.parse('$baseUrl/driver/notifications');
       final response = await http.get(
-        Uri.parse('$baseUrl/driver/notifications'),
+        uri,
         headers: {
           'Authorization': 'Bearer $token',
           'Accept': 'application/json',
@@ -727,6 +747,63 @@ class AuthService {
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'message': 'Network error'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchUnreadNotificationsCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'unread_count': 0};
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/notifications/unread-count'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'unread_count': 0};
+    }
+  }
+
+  static Future<Map<String, dynamic>> clearAllNotifications() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/driver/notifications/clear-all'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> seedSampleNotifications() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/notifications/seed-samples'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
     }
   }
 
@@ -912,6 +989,20 @@ class AuthService {
     }
   }
 
+  /// Fetch full single ride details for driver
+  static Future<Map<String, dynamic>> fetchDriverRideDetails(int rideId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/rides/$rideId'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
   static Future<Map<String, dynamic>> requestWithdrawal({
     required double amount,
     required String paymentMethod,
@@ -979,13 +1070,59 @@ class AuthService {
     }
   }
 
-  static Future<Map<String, dynamic>> sendChatMessage(int rideId, String message) async {
+  static Future<Map<String, dynamic>> sendChatMessage(int rideId, String message, {String? imagePath, String? attachmentUrl}) async {
+    final token = await getToken();
+    try {
+      if (imagePath != null && imagePath.isNotEmpty) {
+        final request = http.MultipartRequest(
+          'POST',
+          Uri.parse('$baseUrl/driver/chats/$rideId/send'),
+        );
+        if (token != null) request.headers['Authorization'] = 'Bearer $token';
+        request.headers['Accept'] = 'application/json';
+        if (message.isNotEmpty) {
+          request.fields['message'] = message;
+        }
+        request.files.add(await http.MultipartFile.fromPath('image', imagePath));
+        final streamedResponse = await request.send();
+        final response = await http.Response.fromStream(streamedResponse);
+        return jsonDecode(response.body);
+      } else {
+        final headers = await getHeaders();
+        final response = await http.post(
+          Uri.parse('$baseUrl/driver/chats/$rideId/send'),
+          headers: headers,
+          body: jsonEncode({
+            'message': message,
+            if (attachmentUrl != null) 'attachment_url': attachmentUrl,
+          }),
+        );
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> deleteChatMessage(int messageId) async {
     final headers = await getHeaders();
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/driver/chats/$rideId/send'),
+      final response = await http.delete(
+        Uri.parse('$baseUrl/driver/chats/messages/$messageId'),
         headers: headers,
-        body: jsonEncode({'message': message}),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> clearChatMessages(int rideId) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/driver/chats/$rideId/clear'),
+        headers: headers,
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -1020,6 +1157,16 @@ class AuthService {
     }
   }
 
+
+  static Future<Map<String, dynamic>> fetchVehicle() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/driver/account/vehicle'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
 
   static Future<Map<String, dynamic>> updateVehicle(Map<String, dynamic> data) async {
     final headers = await getHeaders();
@@ -1141,6 +1288,405 @@ class AuthService {
     final headers = await getHeaders();
     try {
       final response = await http.get(Uri.parse('$baseUrl/subscription/history'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchDriverAccount() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/driver/account'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateDriverProfile(Map<String, dynamic> data) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/driver/account/profile'),
+        headers: headers,
+        body: jsonEncode(data),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchDriverDocuments() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/driver/account/documents'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateDriverDocuments() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(Uri.parse('$baseUrl/driver/account/documents'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchDriverRatings() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/driver/account/ratings'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchDriverPayments() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/driver/account/payments'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateDriverSettings(Map<String, dynamic> settings) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/account/settings'),
+        headers: headers,
+        body: jsonEncode(settings),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> changeDriverPassword({
+    required String currentPassword,
+    required String newPassword,
+    required String confirmPassword,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/account/change-password'),
+        headers: headers,
+        body: jsonEncode({
+          'current_password': currentPassword,
+          'new_password': newPassword,
+          'new_password_confirmation': confirmPassword,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchDriverLegalInfo() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/driver/account/legal'), headers: headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  // ==========================================
+  // SAFETY & EMERGENCY (নিরাপত্তা ও জরুরি সহায়তা)
+  // ==========================================
+
+  /// 1. Trigger Driver SOS Alert
+  static Future<Map<String, dynamic>> triggerDriverSos({
+    int? rideId,
+    double? lat,
+    double? lng,
+    String? emergencyNumber,
+    String? details,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/safety/sos'),
+        headers: headers,
+        body: jsonEncode({
+          if (rideId != null && rideId > 0) 'ride_id': rideId,
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+          if (emergencyNumber != null) 'emergency_number': emergencyNumber,
+          if (details != null) 'details': details,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// 2. Fetch Driver Emergency Contact
+  static Future<Map<String, dynamic>> fetchDriverEmergencyContact() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/safety/emergency-contact'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// 2b. Update Driver Emergency Contact
+  static Future<Map<String, dynamic>> updateDriverEmergencyContact({
+    required String phone,
+    String? name,
+    String? relation,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/safety/emergency-contact'),
+        headers: headers,
+        body: jsonEncode({
+          'phone': phone,
+          if (name != null) 'name': name,
+          if (relation != null) 'relation': relation,
+          'emergency_contact_phone': phone,
+          if (name != null) 'emergency_contact_name': name,
+          if (relation != null) 'emergency_contact_relation': relation,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// 2c. Alert Driver Emergency Contact (Send SMS/Location Alert)
+  static Future<Map<String, dynamic>> alertDriverEmergencyContact({
+    double? lat,
+    double? lng,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/safety/emergency-contact/alert'),
+        headers: headers,
+        body: jsonEncode({
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// 3. Share Live Location
+  static Future<Map<String, dynamic>> shareDriverLiveLocation({
+    int? rideId,
+    double? lat,
+    double? lng,
+    int durationHours = 3,
+    String sharedVia = 'link',
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/safety/share-location'),
+        headers: headers,
+        body: jsonEncode({
+          if (rideId != null && rideId > 0) 'ride_id': rideId,
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+          'duration_hours': durationHours,
+          'shared_via': sharedVia,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// 4. Report Passenger
+  static Future<Map<String, dynamic>> reportPassenger({
+    int? passengerId,
+    int? rideId,
+    required String category,
+    required String description,
+    String? location,
+    double? lat,
+    double? lng,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/safety/report-passenger'),
+        headers: headers,
+        body: jsonEncode({
+          if (passengerId != null && passengerId > 0) 'passenger_id': passengerId,
+          if (rideId != null && rideId > 0) 'ride_id': rideId,
+          'category': category,
+          'description': description,
+          if (location != null) 'location': location,
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// 5. Report Safety Issue (Accident, breakdown, hazard)
+  static Future<Map<String, dynamic>> reportSafetyIssue({
+    required String category,
+    required String description,
+    String? location,
+    double? lat,
+    double? lng,
+    int? rideId,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/safety/report-issue'),
+        headers: headers,
+        body: jsonEncode({
+          'category': category,
+          'description': description,
+          if (location != null) 'location': location,
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+          if (rideId != null && rideId > 0) 'ride_id': rideId,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// 6. Fetch Safety Hotlines
+  static Future<Map<String, dynamic>> fetchDriverSafetyHotlines() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/safety/hotlines'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  // ==========================================
+  // DRIVER BACKGROUND TRACKING & SYSTEM API
+  // ==========================================
+
+  /// Send dedicated background heartbeat with location, screen state & battery
+  static Future<Map<String, dynamic>> sendBackgroundHeartbeat({
+    double? lat,
+    double? lng,
+    double? heading,
+    double? speed,
+    double? accuracy,
+    bool isBackground = false,
+    bool isScreenLocked = false,
+    double? batteryLevel,
+    bool gpsEnabled = true,
+    bool locationPermissionGranted = true,
+    bool hasInternet = true,
+  }) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/background/heartbeat'),
+        headers: headers,
+        body: jsonEncode({
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+          if (heading != null) 'heading': heading,
+          if (speed != null) 'speed': speed,
+          if (accuracy != null) 'accuracy': accuracy,
+          'is_background': isBackground,
+          'is_screen_locked': isScreenLocked,
+          if (batteryLevel != null) 'battery_level': batteryLevel,
+          'gps_enabled': gpsEnabled,
+          'location_permission_granted': locationPermissionGranted,
+          'has_internet': hasInternet,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {
+        'success': false,
+        'is_connection_error': true,
+        'message': 'ইন্টারনেট সংযোগ বিচ্ছিন্ন (Connection Lost): $e',
+      };
+    }
+  }
+
+  /// Fetch driver background tracking health and service status
+  static Future<Map<String, dynamic>> fetchBackgroundStatus() async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/driver/background/status'),
+        headers: headers,
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Register or update device FCM token
+  static Future<Map<String, dynamic>> registerDeviceToken(String token, {String platform = 'android'}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/device-token'),
+        headers: headers,
+        body: jsonEncode({
+          'fcm_token': token,
+          'device_platform': platform,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  /// Gracefully set driver offline when connection lost, force stopped, or app closed
+  static Future<Map<String, dynamic>> setDriverOfflineGracefully({String reason = 'manual_offline'}) async {
+    final headers = await getHeaders();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/background/offline'),
+        headers: headers,
+        body: jsonEncode({
+          'reason': reason,
+        }),
+      );
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};

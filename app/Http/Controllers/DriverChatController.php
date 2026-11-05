@@ -87,7 +87,7 @@ class DriverChatController extends Controller
         $driverRideIds = Ride::where('driver_id', $user->id)
             ->whereIn('status', ['accepted', 'ongoing', 'arrived', 'started', 'completed'])
             ->orderBy('updated_at', 'desc')
-            ->take(20)
+            ->take(30)
             ->pluck('id');
 
         $allRideIds = $messageRideIds->concat($driverRideIds)->unique();
@@ -111,20 +111,35 @@ class DriverChatController extends Controller
 
             $sortTime = $lastMessage ? $lastMessage->created_at : $ride->updated_at;
 
+            $lastText = 'চ্যাট শুরু করতে ট্যাপ করুন...';
+            if ($lastMessage) {
+                if (!empty($lastMessage->message)) {
+                    $lastText = $lastMessage->message;
+                } elseif (!empty($lastMessage->attachment_url)) {
+                    $lastText = '📷 [ছবি সংযুক্ত]';
+                }
+            }
+
+            $isActive = in_array($ride->status, ['accepted', 'arrived', 'started', 'ongoing']);
+
             return [
                 'id' => $ride->id,
                 'ride_id' => $ride->id,
                 'passenger_name' => $passengerName,
-                'passenger_phone' => $p?->phone,
-                'passenger_avatar' => ($p && $p->avatar) ? asset('storage/' . $p->avatar) : null,
+                'passenger_phone' => $p?->phone ?? 'ফোন নম্বর নেই',
+                'passenger_avatar' => ($p && $p->avatar) ? (str_starts_with($p->avatar, 'http') ? $p->avatar : asset('storage/' . $p->avatar)) : null,
                 'passenger_rating' => (float) ($p?->rating ?? 4.8),
+                'vehicle_type' => $ride->vehicle_type ?? 'Private Car',
                 'ride_status' => $ride->status,
+                'is_active' => $isActive,
                 'pickup' => $ride->pickup_location ?? 'পিকআপ স্থান',
                 'dropoff' => $ride->dropoff_location ?? 'গন্তব্য স্থান',
                 'fare' => '৳' . round($ride->fare_amount, 2),
-                'last_message' => $lastMessage ? $lastMessage->message : 'চ্যাট শুরু করতে ট্যাপ করুন...',
+                'last_message' => $lastText,
+                'last_attachment_url' => $lastMessage?->attachment_url,
                 'last_sender' => $lastMessage ? ($lastMessage->sender_id === $user->id ? 'me' : 'passenger') : null,
-                'time' => $lastMessage ? $lastMessage->created_at->diffForHumans() : ($ride->created_at ? $ride->created_at->diffForHumans() : 'এখন'),
+                'time' => $lastMessage ? $lastMessage->created_at->format('h:i A') : ($ride->created_at ? $ride->created_at->format('h:i A') : 'এখন'),
+                'date_time' => $lastMessage ? $lastMessage->created_at->format('d M, h:i A') : '',
                 'unread_count' => $unreadCount,
                 '_sort_time' => $sortTime,
             ];
@@ -135,6 +150,25 @@ class DriverChatController extends Controller
             unset($item['_sort_time']);
             return $item;
         });
+
+        // 3 Filtered Groups specified by user:
+        // 1. All Messages
+        $allMessages = $chats;
+
+        // 2. Active Ride Chats (currently ongoing/accepted/arrived)
+        $activeChats = $chats->filter(fn ($c) => $c['is_active'] === true)->values();
+
+        // 3. Previous Chats (completed/cancelled)
+        $previousChats = $chats->filter(fn ($c) => $c['is_active'] === false)->values();
+
+        $totalUnread = $chats->sum('unread_count');
+
+        $counts = [
+            'all' => $allMessages->count(),
+            'active' => $activeChats->count(),
+            'previous' => $previousChats->count(),
+            'unread_total' => $totalUnread,
+        ];
 
         // Fetch driver notifications
         $notifications = Notification::where('user_id', $user->id)
@@ -155,7 +189,11 @@ class DriverChatController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
-                'chats' => $chats,
+                'all_messages' => $allMessages,
+                'active_chats' => $activeChats,
+                'previous_chats' => $previousChats,
+                'counts' => $counts,
+                'chats' => $allMessages,
                 'notifications' => $notifications,
                 'realtime_config' => $this->getRealtimeConfigData(),
             ],
@@ -240,6 +278,7 @@ class DriverChatController extends Controller
 
         $messages = $rawMessages->map(function ($msg) use ($user) {
             $isMe = ($msg->sender_id === $user->id);
+            $attachment = $msg->attachment_url ? (str_starts_with($msg->attachment_url, 'http') ? $msg->attachment_url : asset('storage/' . $msg->attachment_url)) : null;
             return [
                 'id' => $msg->id,
                 'ride_id' => $msg->ride_id,
@@ -248,6 +287,8 @@ class DriverChatController extends Controller
                 'receiver_id' => $msg->receiver_id,
                 'text' => $msg->message,
                 'message' => $msg->message,
+                'attachment_url' => $attachment,
+                'attachment_type' => $msg->attachment_type ?? ($attachment ? 'image' : null),
                 'is_me' => $isMe,
                 'is_read' => (bool) $msg->is_read,
                 'time' => $msg->created_at ? $msg->created_at->format('h:i A') : '',
@@ -313,6 +354,7 @@ class DriverChatController extends Controller
 
         $formatted = $newMessages->map(function ($msg) use ($user) {
             $isMe = ($msg->sender_id === $user->id);
+            $attachment = $msg->attachment_url ? (str_starts_with($msg->attachment_url, 'http') ? $msg->attachment_url : asset('storage/' . $msg->attachment_url)) : null;
             return [
                 'id' => $msg->id,
                 'ride_id' => $msg->ride_id,
@@ -321,6 +363,8 @@ class DriverChatController extends Controller
                 'receiver_id' => $msg->receiver_id,
                 'text' => $msg->message,
                 'message' => $msg->message,
+                'attachment_url' => $attachment,
+                'attachment_type' => $msg->attachment_type ?? ($attachment ? 'image' : null),
                 'is_me' => $isMe,
                 'is_read' => (bool) $msg->is_read,
                 'time' => $msg->created_at ? $msg->created_at->format('h:i A') : '',
@@ -342,7 +386,7 @@ class DriverChatController extends Controller
     }
 
     /**
-     * Send a message from driver to passenger with Reverb / Polling dual dispatch.
+     * Send a message from driver to passenger with optional image attachment and Reverb / Polling dual dispatch.
      *
      * @param Request $request
      * @param int|string $id
@@ -351,8 +395,17 @@ class DriverChatController extends Controller
     public function sendMessage(Request $request, int|string $id): JsonResponse
     {
         $request->validate([
-            'message' => 'required|string|max:1000',
+            'message' => 'nullable|string|max:1000',
+            'image' => 'nullable|file|mimes:jpeg,png,jpg,webp,gif|max:5120',
+            'attachment_url' => 'nullable|string|max:500',
         ]);
+
+        if (empty($request->message) && !$request->hasFile('image') && empty($request->attachment_url)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'অনুগ্রহ করে মেসেজ বা ছবি প্রদান করুন'
+            ], 422);
+        }
 
         $user = $request->user();
 
@@ -366,11 +419,23 @@ class DriverChatController extends Controller
 
         $receiverId = ($user->id === $ride->driver_id) ? $ride->user_id : $ride->driver_id;
 
+        $attachmentUrl = null;
+        if ($request->hasFile('image')) {
+            $path = $request->file('image')->store('chat_attachments', 'public');
+            $attachmentUrl = asset('storage/' . $path);
+        } elseif ($request->filled('attachment_url')) {
+            $attachmentUrl = $request->attachment_url;
+        }
+
+        $msgText = $request->message ?? ($attachmentUrl ? '📷 [ছবি সংযুক্ত]' : '');
+
         $msg = Message::create([
             'ride_id' => $ride->id,
             'sender_id' => $user->id,
             'receiver_id' => $receiverId,
-            'message' => $request->message,
+            'message' => $msgText,
+            'attachment_url' => $attachmentUrl,
+            'attachment_type' => $attachmentUrl ? 'image' : null,
             'is_read' => false,
         ]);
 
@@ -380,15 +445,14 @@ class DriverChatController extends Controller
             FcmService::send(
                 $receiver->fcm_token,
                 'চালক ' . $user->name . '-এর বার্তা',
-                $request->message,
+                $msgText,
                 ['ride_id' => (string) $ride->id, 'type' => 'chat_message']
             );
         }
 
         $mode = $this->getActiveMode();
 
-        // Safe Reverb broadcast dispatch:
-        // Wrapped in try/catch to ensure shared hosts without SSH/WebSocket daemon never return 500
+        // Safe Reverb broadcast dispatch
         try {
             if ($mode === 'reverb' || config('broadcasting.default') !== 'null') {
                 broadcast(new MessageSent($msg, $ride, 'driver'))->toOthers();
@@ -407,6 +471,8 @@ class DriverChatController extends Controller
                 'receiver_id' => $receiverId,
                 'text' => $msg->message,
                 'message' => $msg->message,
+                'attachment_url' => $msg->attachment_url ? (str_starts_with($msg->attachment_url, 'http') ? $msg->attachment_url : asset('storage/' . $msg->attachment_url)) : null,
+                'attachment_type' => $msg->attachment_type,
                 'is_me' => true,
                 'is_read' => false,
                 'time' => $msg->created_at->format('h:i A'),
@@ -414,6 +480,67 @@ class DriverChatController extends Controller
                 'realtime_mode' => $mode,
             ],
             'message' => 'মেসেজ সফলভাবে পাঠানো হয়েছে'
+        ]);
+    }
+
+    /**
+     * Delete an individual message from chat.
+     *
+     * @param Request $request
+     * @param int|string $id
+     * @return JsonResponse
+     */
+    public function deleteMessage(Request $request, int|string $id): JsonResponse
+    {
+        $user = $request->user();
+        $msg = Message::find($id);
+
+        if (!$msg) {
+            return response()->json([
+                'success' => false,
+                'message' => 'বার্তাটি পাওয়া যায়নি (Message not found)'
+            ], 404);
+        }
+
+        if ($msg->sender_id !== $user->id && $msg->receiver_id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'অননুমোদিত অ্যাক্সেস (Unauthorized access)'
+            ], 403);
+        }
+
+        $msg->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'বার্তাটি সফলভাবে মুছে ফেলা হয়েছে (Message deleted)'
+        ]);
+    }
+
+    /**
+     * Clear all messages in a ride chat conversation.
+     *
+     * @param Request $request
+     * @param int|string $id
+     * @return JsonResponse
+     */
+    public function clearChat(Request $request, int|string $id): JsonResponse
+    {
+        $user = $request->user();
+        $ride = Ride::find($id);
+
+        if (!$ride || ($ride->driver_id !== $user->id && $ride->user_id !== $user->id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'অননুমোদিত অ্যাক্সেস বা রাইড পাওয়া যায়নি'
+            ], 403);
+        }
+
+        Message::where('ride_id', $id)->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'চ্যাটের সকল বার্তা সফলভাবে মুছে ফেলা হয়েছে (Chat cleared)'
         ]);
     }
 }

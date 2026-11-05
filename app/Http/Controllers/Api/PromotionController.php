@@ -15,7 +15,6 @@ class PromotionController extends Controller
 {
     /**
      * Get active promotional offers and discounts dynamically from database.
-     *
      * @param Request $request
      * @return JsonResponse
      */
