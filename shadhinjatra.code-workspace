@@ -1,0 +1,24 @@
+{
+  "folders": [
+    {
+      "name": "🌐 Laravel Backend API",
+      "path": "."
+    },
+    {
+      "name": "📱 User App (Flutter)",
+      "path": "APP_SHADHINJATRA_USER/shadhinjatra"
+    },
+    {
+      "name": "🚗 Driver App (Flutter)",
+      "path": "APP_SHADHINJATRA_USER/shadhinjatradriver"
+    }
+  ],
+  "settings": {
+    "dart.projectSearchPaths": [
+      "APP_SHADHINJATRA_USER/shadhinjatra",
+      "APP_SHADHINJATRA_USER/shadhinjatradriver"
+    ],
+    "dart.openDevTools": "never"
+  }
+}
+
