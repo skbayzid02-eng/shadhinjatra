@@ -276,7 +276,7 @@ class DriverSafetyController extends Controller
      */
     public function viewTrackLocation(string $token): JsonResponse
     {
-        $share = LiveLocationShare::with(['user', 'ride'])->where('token', $token)->first();
+        $share = LiveLocationShare::with(['user', 'ride.driver', 'ride.passenger'])->where('token', $token)->first();
 
         if (!$share || !$share->is_active || $share->isExpired()) {
             return response()->json([
@@ -285,24 +285,38 @@ class DriverSafetyController extends Controller
             ], 404);
         }
 
-        $driver = $share->user;
-        $lat = $driver->latitude ? (float) $driver->latitude : (float) $share->latitude;
-        $lon = $driver->longitude ? (float) $driver->longitude : (float) $share->longitude;
+        $ride = $share->ride;
+        $driver = $ride?->driver ?? ($share->user?->role === 'driver' ? $share->user : null);
+        $passenger = $ride?->passenger ?? ($share->user?->role === 'passenger' ? $share->user : null);
+
+        $driverLat = $driver?->latitude ? (float) $driver->latitude : (float) $share->latitude;
+        $driverLon = $driver?->longitude ? (float) $driver->longitude : (float) $share->longitude;
 
         return response()->json([
             'success' => true,
             'data' => [
-                'driver_name' => $driver->name,
-                'driver_phone' => $driver->phone,
-                'vehicle_type' => $driver->vehicle_type ?? 'Car',
-                'vehicle_model' => $driver->vehicle_model ?? 'Toyota Corolla',
-                'vehicle_number' => $driver->vehicle_number ?? 'DHA-12-3456',
-                'latitude' => $lat,
-                'longitude' => $lon,
-                'google_maps_url' => "https://maps.google.com/?q={$lat},{$lon}",
-                'last_updated' => $driver->last_location_updated_at ? $driver->last_location_updated_at->diffForHumans() : 'এখন',
+                'driver_name' => $driver?->name ?? 'আমাদের চালক',
+                'driver_phone' => $driver?->phone ?? '',
+                'vehicle_type' => $driver?->vehicle_type ?? ($ride?->vehicle_type ?? 'Car'),
+                'vehicle_model' => $driver?->vehicle_model ?? 'Toyota Corolla',
+                'vehicle_number' => $driver?->vehicle_number ?? 'DHA-12-3456',
+                'latitude' => $driverLat,
+                'longitude' => $driverLon,
+                'google_maps_url' => "https://maps.google.com/?q={$driverLat},{$driverLon}",
+                'last_updated' => $driver?->last_location_updated_at ? $driver->last_location_updated_at->diffForHumans() : 'এখন',
                 'is_active' => true,
                 'expires_at' => $share->expires_at->toIso8601String(),
+                'ride' => $ride ? [
+                    'id' => $ride->id,
+                    'status' => $ride->status,
+                    'status_text' => $ride->status === 'started' ? 'নিরাপদ যাত্রা চলছে (Trip Started)' : ucfirst($ride->status),
+                    'pickup_location' => $ride->pickup_location,
+                    'dropoff_location' => $ride->dropoff_location,
+                    'fare_amount' => $ride->fare_amount,
+                    'distance_km' => (float) ($ride->distance_km ?? 0.0),
+                    'vehicle_type' => $ride->vehicle_type,
+                ] : null,
+                'passenger_name' => $passenger?->name,
             ],
             'message' => 'Live tracking location fetched successfully'
         ]);

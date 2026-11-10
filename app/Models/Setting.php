@@ -42,6 +42,21 @@ class Setting extends Model
     }
 
     /**
+     * Check if online payments (bKash, Nagad, Cards, Gateway) are globally enabled.
+     */
+    public static function isOnlinePaymentEnabled(): bool
+    {
+        $val = static::get('online_payment_enabled');
+        if ($val === null) {
+            return (bool) env('ENABLE_ONLINE_PAYMENT', true);
+        }
+        if (is_bool($val)) {
+            return $val;
+        }
+        return filter_var($val, FILTER_VALIDATE_BOOLEAN);
+    }
+
+    /**
      * Set a setting value by key.
      *
      * @param string $key

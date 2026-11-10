@@ -49,35 +49,16 @@ class HomeController extends Controller
             ->take(5)
             ->get();
 
-        if ($notifications->isEmpty()) {
-            $recentNotifications = [
-                [
-                    'id' => 1,
-                    'title' => 'Welcome to Shadhin Jatra!',
-                    'message' => 'Thank you for choosing Shadhin Jatra for your journey.',
-                    'time' => '1 hour ago',
-                    'icon' => 'notifications',
-                    'page_link' => 'notifications',
-                ],
-                [
-                    'id' => 2,
-                    'title' => 'Your trip to Cox\'s Bazar is confirmed.',
-                    'message' => 'Your ride booking has been confirmed.',
-                    'time' => '1 day ago',
-                    'icon' => 'directions_car',
-                    'page_link' => 'activity',
-                ],
-            ];
-        } else {
-            $recentNotifications = $notifications->map(static fn (Notification $n): array => [
-                'id' => $n->id,
-                'title' => (string) $n->title,
-                'message' => (string) ($n->message ?? ''),
-                'time' => $n->created_at ? $n->created_at->diffForHumans() : 'Just now',
-                'icon' => (string) ($n->type === 'ride' ? 'directions_car' : 'notifications'),
-                'page_link' => 'notifications',
-            ])->values()->all();
-        }
+        $recentNotifications = $notifications->map(static fn (Notification $n): array => [
+            'id' => $n->id,
+            'title' => (string) $n->title,
+            'message' => (string) ($n->message ?? ''),
+            'time' => $n->created_at ? $n->created_at->diffForHumans() : 'Just now',
+            'icon' => (string) (in_array($n->type, ['ride', 'ride_request', 'ride_confirmed', 'driver_accepted', 'driver_arrived', 'trip_started', 'trip_completed']) ? 'directions_car' : 'notifications'),
+            'type' => (string) $n->type,
+            'is_read' => (bool) $n->is_read,
+            'page_link' => 'notifications',
+        ])->values()->all();
 
         // 3. Dynamic Promotional Banners with icons and page links from database
         $banners = PromotionalBanner::query()
@@ -85,70 +66,31 @@ class HomeController extends Controller
             ->orderBy('order')
             ->get();
 
-        if ($banners->isEmpty()) {
-            $promotionalBanners = [
-                [
-                    'id' => 1,
-                    'title' => '50% Off First Ride!',
-                    'subtitle' => 'Use code WELCOME50',
-                    'color' => '#673AB7',
-                    'icon' => 'local_offer',
-                    'page_link' => 'promotions',
-                ],
-                [
-                    'id' => 2,
-                    'title' => 'Invite Friends',
-                    'subtitle' => 'Get ৳100 off your next ride',
-                    'color' => '#E91E63',
-                    'icon' => 'people',
-                    'page_link' => 'account',
-                ],
-            ];
-        } else {
-            $promotionalBanners = $banners->map(static fn (PromotionalBanner $banner): array => [
-                'id' => $banner->id,
-                'title' => (string) $banner->title,
-                'subtitle' => (string) ($banner->subtitle ?? ''),
-                'color' => (string) ($banner->color ?? '#673AB7'),
-                'icon' => (string) ($banner->icon ?? 'local_offer'),
-                'page_link' => (string) ($banner->page_link ?? 'promotions'),
-                'image' => $banner->image,
-            ])->values()->all();
-        }
+        $promotionalBanners = $banners->map(static fn (PromotionalBanner $banner): array => [
+            'id' => $banner->id,
+            'title' => (string) $banner->title,
+            'subtitle' => (string) ($banner->subtitle ?? ''),
+            'color' => (string) ($banner->color ?? '#673AB7'),
+            'icon' => (string) ($banner->icon ?? 'local_offer'),
+            'page_link' => (string) ($banner->page_link ?? 'promotions'),
+            'image' => $banner->image,
+        ])->values()->all();
 
         // 4. Dynamic Saved Places with icons and page links from database
         $userSavedPlaces = SavedPlace::query()
             ->where('user_id', $user->id)
             ->get();
 
-        if ($userSavedPlaces->isEmpty()) {
-            $savedPlaces = [
-                [
-                    'id' => 1,
-                    'name' => 'Home',
-                    'address' => 'Dhanmondi, Dhaka',
-                    'icon' => 'home',
-                    'page_link' => 'ride',
-                ],
-                [
-                    'id' => 2,
-                    'name' => 'Work',
-                    'address' => 'Banani, Dhaka',
-                    'icon' => 'work',
-                    'page_link' => 'ride',
-                ],
-            ];
-        } else {
-            $savedPlaces = $userSavedPlaces->map(static fn (SavedPlace $place): array => [
-                'id' => $place->id,
-                'name' => (string) $place->name,
-                'address' => (string) $place->address,
-                'icon' => (string) ($place->icon ?: 'location_on'),
-                'latitude' => $place->latitude,
-                'longitude' => $place->longitude,
-                'page_link' => 'ride',
-            ])->values()->all();
-        }
+        $savedPlaces = $userSavedPlaces->map(static fn (SavedPlace $place): array => [
+            'id' => $place->id,
+            'name' => (string) $place->name,
+            'address' => (string) $place->address,
+            'icon' => (string) ($place->icon ?: ($place->type === 'home' ? 'home' : ($place->type === 'work' ? 'work' : 'location_on'))),
+            'latitude' => $place->latitude,
+            'longitude' => $place->longitude,
+            'type' => $place->type,
+            'page_link' => 'ride',
+        ])->values()->all();
 
         // 5. Navigation Shortcuts with icons and page links
         $quickActions = [

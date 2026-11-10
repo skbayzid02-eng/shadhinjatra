@@ -51,6 +51,7 @@ class _MainNavigationState extends State<MainNavigation> {
         }
         
         FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+          if (!mounted) return;
           if (message.notification != null) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(

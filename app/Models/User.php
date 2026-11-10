@@ -13,7 +13,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'phone', 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation', 'address', 'password', 'avatar', 'wallet_balance', 'is_online', 'online_since', 'latitude', 'longitude', 'heading', 'speed', 'accuracy', 'last_location_updated_at', 'vehicle_type', 'vehicle_model', 'vehicle_number', 'vehicle_color', 'vehicle_status', 'rating', 'total_ratings', 'is_verified', 'verification_status', 'documents_verified', 'subscription_status', 'subscription_expires_at', 'last_seen_at', 'push_notifications', 'sms_notifications', 'language', 'theme', 'map_style', 'traffic_view', 'two_step_verification', 'fcm_token'])]
+#[Fillable(['name', 'email', 'phone', 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation', 'address', 'password', 'avatar', 'wallet_balance', 'default_payment_method', 'data_sharing', 'profile_visible', 'is_online', 'online_since', 'latitude', 'longitude', 'heading', 'speed', 'accuracy', 'last_location_updated_at', 'vehicle_type', 'vehicle_model', 'vehicle_number', 'vehicle_color', 'vehicle_status', 'rating', 'total_ratings', 'is_verified', 'verification_status', 'documents_verified', 'subscription_status', 'subscription_expires_at', 'last_seen_at', 'push_notifications', 'sms_notifications', 'language', 'theme', 'map_style', 'traffic_view', 'two_step_verification', 'fcm_token'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -133,6 +133,16 @@ class User extends Authenticatable
     public function driverRides(): HasMany
     {
         return $this->hasMany(Ride::class, 'driver_id');
+    }
+
+    /**
+     * Get user payment methods.
+     *
+     * @return HasMany<UserPaymentMethod, User>
+     */
+    public function paymentMethods(): HasMany
+    {
+        return $this->hasMany(UserPaymentMethod::class, 'user_id');
     }
 
     /**

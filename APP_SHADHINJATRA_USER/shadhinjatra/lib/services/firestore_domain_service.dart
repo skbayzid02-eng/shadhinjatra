@@ -15,7 +15,10 @@ class FirestoreDomainService {
 
   /// Default fallback URL when Firestore is offline or not yet initialized
   static String get defaultBaseUrl {
-    if (kIsWeb) return 'http://127.0.0.1:8000/api';
+    if (kIsWeb) {
+      final host = Uri.base.host.isNotEmpty ? Uri.base.host : 'localhost';
+      return 'http://$host:8000/api';
+    }
     try {
       if (Platform.isAndroid || Platform.isIOS) return 'http://192.168.0.7:8000/api';
       if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
@@ -34,10 +37,17 @@ class FirestoreDomainService {
   /// List of candidate base URLs to attempt in order of priority.
   static List<String> get candidateUrls {
     final list = <String>[];
+
+    // For Web browsers, prioritize same-origin host dynamically
+    if (kIsWeb) {
+      final currentBrowserHost = Uri.base.host.isNotEmpty ? Uri.base.host : 'localhost';
+      final browserApiUrl = 'http://$currentBrowserHost:8000/api';
+      list.add(browserApiUrl);
+    }
     
     // 1. Current resolved base URL
     final current = baseUrl.trim();
-    if (current.isNotEmpty) list.add(current);
+    if (current.isNotEmpty && !list.contains(current)) list.add(current);
 
     // 2. Firestore-configured fallback URL if available
     final fb = _cachedFallbackUrl?.trim();
@@ -48,10 +58,10 @@ class FirestoreDomainService {
     // 3. Platform-specific fallback candidates
     final platformFallbacks = kIsWeb
         ? const [
-            'http://127.0.0.1:8000/api',
             'http://localhost:8000/api',
-            'http://shadhinjatra.test/api',
+            'http://127.0.0.1:8000/api',
             'http://192.168.0.7:8000/api',
+            'http://shadhinjatra.test/api',
           ]
         : const [
             'http://192.168.0.7:8000/api',
@@ -139,9 +149,21 @@ class FirestoreDomainService {
         }
 
         // Direct live domain configured in Firestore
-        resolvedUrl ??= data['base_url']?.toString().trim() ??
-            data['api_url']?.toString().trim() ??
-            data['domain']?.toString().trim();
+        if (resolvedUrl == null || resolvedUrl.isEmpty) {
+          final liveCandidate = data['base_url']?.toString().trim() ??
+              data['api_url']?.toString().trim() ??
+              data['domain']?.toString().trim();
+          if (liveCandidate != null && liveCandidate.isNotEmpty) {
+            if (kIsWeb && (liveCandidate.contains('192.168.') || liveCandidate.contains('10.0.'))) {
+              // On web, only prefer LAN IP if the current browser window is also accessing via LAN IP
+              if (Uri.base.host.contains('192.168.') || Uri.base.host.contains('10.0.')) {
+                resolvedUrl = liveCandidate;
+              }
+            } else {
+              resolvedUrl = liveCandidate;
+            }
+          }
+        }
 
         if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
           // Normalize URL: remove trailing slash and ensure /api endpoint

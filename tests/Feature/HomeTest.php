@@ -170,27 +170,9 @@ class HomeTest extends TestCase
                         'upcoming_bookings' => 0,
                     ],
                     'unread_notifications_count' => 0,
-                    'recent_notifications' => [
-                        [
-                            'title' => 'Welcome to Shadhin Jatra!',
-                            'icon' => 'notifications',
-                            'page_link' => 'notifications',
-                        ],
-                    ],
-                    'promotional_banners' => [
-                        [
-                            'title' => '50% Off First Ride!',
-                            'icon' => 'local_offer',
-                            'page_link' => 'promotions',
-                        ],
-                    ],
-                    'saved_places' => [
-                        [
-                            'name' => 'Home',
-                            'icon' => 'home',
-                            'page_link' => 'ride',
-                        ],
-                    ],
+                    'recent_notifications' => [],
+                    'promotional_banners' => [],
+                    'saved_places' => [],
                 ],
                 'message' => 'Home data fetched successfully',
             ]);

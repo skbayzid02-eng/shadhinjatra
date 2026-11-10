@@ -67,7 +67,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> with SingleTi
         'ride_accepted',
         'ride_arrived',
         'ride_started',
+        'trip_started',
         'ride_completed',
+        'trip_completed',
         'ride_cancelled',
         'driver_accepted',
         'driver_arrived',
@@ -78,13 +80,45 @@ class _NotificationsScreenState extends State<NotificationsScreen> with SingleTi
 
     _offers = _allNotifications.where((item) {
       final type = item['type']?.toString().toLowerCase() ?? '';
-      return ['promo', 'offer', 'cashback', 'discount', 'coupon'].contains(type);
+      return ['promo', 'promotional', 'offer', 'cashback', 'discount', 'coupon'].contains(type);
     }).toList();
 
     _systemUpdates = _allNotifications.where((item) {
       final type = item['type']?.toString().toLowerCase() ?? '';
-      return ['system', 'warning', 'update', 'security', 'announcement', 'payment'].contains(type);
+      return [
+        'system',
+        'warning',
+        'update',
+        'security',
+        'announcement',
+        'payment',
+        'payment_successful',
+        'refund',
+        'refund_update',
+        'wallet_refund',
+        'wallet_recharge',
+      ].contains(type);
     }).toList();
+  }
+
+  Future<void> _seedSampleNotifications() async {
+    setState(() => _isLoading = true);
+    final res = await AuthService.seedSampleNotifications();
+    if (res['success'] == true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('৯টি প্রধান নোটিফিকেশন সফলভাবে লোড করা হয়েছে!')),
+        );
+      }
+      await _fetchNotifications();
+    } else {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(res['message']?.toString() ?? 'নোটিফিকেশন লোড করতে ব্যর্থ হয়েছে')),
+        );
+      }
+    }
   }
 
   Future<void> _fetchNotifications() async {
@@ -653,6 +687,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> with SingleTi
                     onPressed: _markAllAsRead,
                   ),
                 IconButton(
+                  icon: const Icon(Icons.playlist_add_check_rounded, color: Colors.white),
+                  tooltip: 'নমুনা নোটিফিকেশন লোড করুন',
+                  onPressed: _seedSampleNotifications,
+                ),
+                IconButton(
                   icon: const Icon(Icons.settings_outlined, color: Colors.white),
                   tooltip: 'Settings',
                   onPressed: _showSettingsBottomSheet,
@@ -801,26 +840,46 @@ class _NotificationsScreenState extends State<NotificationsScreen> with SingleTi
         Color circleBgColor = const Color(0xFFFFF3E0);
 
         final type = item['type']?.toString().toLowerCase() ?? '';
-        if (type == 'ride_confirmed' || type == 'success') {
+        if (type == 'ride_confirmed' || type == 'booking_confirmed' || type == 'success') {
           icon = Icons.check_circle_rounded;
-          iconColor = const Color(0xFF43A047);
-          circleBgColor = const Color(0xFFE8F5E9);
-        } else if (type == 'ride_request' || type == 'driver_accepted' || type == 'driver_arrived' || type == 'ride_started') {
+          iconColor = const Color(0xFF10B981);
+          circleBgColor = const Color(0xFFECFDF5);
+        } else if (type == 'driver_accepted' || type == 'ride_accepted') {
+          icon = Icons.thumb_up_alt_rounded;
+          iconColor = const Color(0xFF6366F1);
+          circleBgColor = const Color(0xFFEEF2FF);
+        } else if (type == 'driver_arrived' || type == 'ride_arrived') {
           icon = Icons.near_me_rounded;
-          iconColor = const Color(0xFFFF9800);
-          circleBgColor = const Color(0xFFFFF3E0);
-        } else if (type == 'ride_cancelled' || type == 'warning' || type == 'update') {
-          icon = Icons.warning_rounded;
-          iconColor = const Color(0xFFE53935);
-          circleBgColor = const Color(0xFFFFEBEE);
-        } else if (type == 'promo' || type == 'offer' || type == 'cashback' || type == 'discount' || type == 'coupon') {
+          iconColor = const Color(0xFFF59E0B);
+          circleBgColor = const Color(0xFFFFFBEB);
+        } else if (type == 'trip_started' || type == 'ride_started') {
+          icon = Icons.directions_car_rounded;
+          iconColor = const Color(0xFF06B6D4);
+          circleBgColor = const Color(0xFFECFEFF);
+        } else if (type == 'trip_completed' || type == 'ride_completed') {
+          icon = Icons.flag_rounded;
+          iconColor = const Color(0xFF059669);
+          circleBgColor = const Color(0xFFD1FAE5);
+        } else if (type == 'payment' || type == 'payment_successful' || type == 'wallet_recharge') {
+          icon = Icons.payments_rounded;
+          iconColor = const Color(0xFF16A34A);
+          circleBgColor = const Color(0xFFDCFCE7);
+        } else if (type == 'refund' || type == 'refund_update' || type == 'wallet_refund') {
+          icon = Icons.replay_circle_filled_rounded;
+          iconColor = const Color(0xFF0D9488);
+          circleBgColor = const Color(0xFFCCFBF1);
+        } else if (type == 'ride_cancelled' || type == 'warning') {
+          icon = Icons.cancel_rounded;
+          iconColor = const Color(0xFFEF4444);
+          circleBgColor = const Color(0xFFFEE2E2);
+        } else if (type == 'promo' || type == 'promotional' || type == 'offer' || type == 'cashback' || type == 'discount') {
           icon = Icons.local_offer_rounded;
-          iconColor = const Color(0xFFFB8C00);
-          circleBgColor = const Color(0xFFFFF3E0);
-        } else if (type == 'ride_completed' || type == 'info') {
+          iconColor = const Color(0xFF8B5CF6);
+          circleBgColor = const Color(0xFFF3E8FF);
+        } else if (type == 'info' || type == 'ride_request') {
           icon = Icons.info_rounded;
-          iconColor = const Color(0xFF1E88E5);
-          circleBgColor = const Color(0xFFE3F2FD);
+          iconColor = const Color(0xFF3B82F6);
+          circleBgColor = const Color(0xFFEFF6FF);
         }
 
         return Dismissible(

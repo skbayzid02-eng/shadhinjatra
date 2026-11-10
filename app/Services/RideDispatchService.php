@@ -30,9 +30,13 @@ class RideDispatchService
     public const DISPATCH_BATCH_SIZE = 1;
 
     /**
-     * Progressive search radius tiers in kilometers (Initial tier is 5.0 KM).
+     * Progressive search radius tiers in kilometers:
+     * 1. First 5.0 KM
+     * 2. Then 10.0 KM
+     * 3. Then 15.0 KM
+     * 4. Then 20.0 KM
      */
-    public const DEFAULT_RADIUS_TIERS = [5.0];
+    public const DEFAULT_RADIUS_TIERS = [5.0, 10.0, 15.0, 20.0];
 
     /**
      * Get search radius in kilometers.
@@ -42,7 +46,9 @@ class RideDispatchService
      */
     public function getRadiusForAttempt(int $attempt): float
     {
-        return self::DEFAULT_SEARCH_RADIUS;
+        $tiers = self::DEFAULT_RADIUS_TIERS;
+        $index = min(max(0, $attempt - 1), count($tiers) - 1);
+        return (float) $tiers[$index];
     }
 
     /**
@@ -188,13 +194,21 @@ class RideDispatchService
         }
 
         $nextAttempt = ($ride->dispatch_attempt ?? 0) + 1;
-        $currentRadius = self::DEFAULT_SEARCH_RADIUS;
+        $tierIndex = min($nextAttempt - 1, count(self::DEFAULT_RADIUS_TIERS) - 1);
+        $currentRadius = (float) self::DEFAULT_RADIUS_TIERS[$tierIndex];
 
-        // Rank eligible candidates within 5.0 KM search radius (Nearest First)
+        // Rank eligible candidates within current progressive tier (5 -> 10 -> 15 -> 20 KM)
         $rankedQueue = $this->rankNearbyDrivers($ride, $currentRadius);
 
+        // If no candidate found in current tier, dynamically expand through 10, 15, 20 KM tiers
+        while ($rankedQueue->isEmpty() && $tierIndex < count(self::DEFAULT_RADIUS_TIERS) - 1) {
+            $tierIndex++;
+            $currentRadius = (float) self::DEFAULT_RADIUS_TIERS[$tierIndex];
+            $rankedQueue = $this->rankNearbyDrivers($ride, $currentRadius);
+        }
+
         if ($rankedQueue->isEmpty()) {
-            // No available eligible drivers found within 5.0 KM
+            // No available eligible drivers found up to 20 KM
             $ride->status = 'no_drivers_found';
             $ride->dispatched_driver_id = null;
             $ride->dispatched_driver_ids = null;
@@ -234,6 +248,7 @@ class RideDispatchService
                 'distance' => $ride->distance_km ?? 0,
                 'passenger_name' => $ride->passenger?->name ?? 'যাত্রী',
                 'passenger_phone' => $ride->passenger?->phone ?? '',
+                'special_instructions' => $ride->special_instructions,
                 'distance_to_pickup_km' => $candidate['distance_km'],
                 'search_radius_km' => $currentRadius,
                 'expires_in' => self::DISPATCH_TIMEOUT_SECONDS,
@@ -255,6 +270,7 @@ class RideDispatchService
                     'dropoff' => (string) $ride->dropoff_location,
                     'fare' => (string) $ride->fare_amount,
                     'distance' => (string) ($ride->distance_km ?? 0),
+                    'special_instructions' => (string) ($ride->special_instructions ?? ''),
                     'radius_km' => (string) $currentRadius,
                 ]
             );

@@ -1146,14 +1146,17 @@ class DriverHomeController extends Controller
         Notification::create([
             'user_id' => $ride->user_id,
             'ride_id' => $ride->id,
-            'title' => 'রাইড সম্পন্ন হয়েছে!',
-            'message' => "গন্তব্যে পৌঁছানোর জন্য ধন্যবাদ। মোট ভাড়া: ৳{$ride->fare_amount}।",
+            'title' => 'You Have Reached Your Destination • আপনি গন্তব্যে পৌঁছে গেছেন!',
+            'message' => "গন্তব্যে পৌঁছানোর জন্য ধন্যবাদ। মোট দূরত্ব: {$distKm} কিমি, সময়: {$totalTimeMinutes} মিনিট, চূড়ান্ত ভাড়া: ৳{$ride->fare_amount}।",
             'type' => 'ride_completed',
             'data' => [
                 'ride_id' => $ride->id,
                 'status' => 'completed',
                 'driver_name' => $user->name,
+                'total_distance' => round($distKm, 2) . ' কিমি',
+                'total_time' => $totalTimeMinutes . ' মিনিট',
                 'fare' => (float) $ride->fare_amount,
+                'payment_status' => $ride->payment_status,
             ],
             'is_read' => false,
         ]);
@@ -1161,8 +1164,8 @@ class DriverHomeController extends Controller
         if ($ride->passenger && $ride->passenger->fcm_token) {
             FcmService::send(
                 $ride->passenger->fcm_token,
-                'রাইড সম্পন্ন হয়েছে!',
-                "গন্তব্যে পৌঁছানোর জন্য ধন্যবাদ। মোট ভাড়া: ৳{$ride->fare_amount}।",
+                'You Have Reached Your Destination • আপনি গন্তব্যে পৌঁছে গেছেন!',
+                "গন্তব্যে পৌঁছানোর জন্য ধন্যবাদ। মোট দূরত্ব: {$distKm} কিমি, সময়: {$totalTimeMinutes} মিনিট, চূড়ান্ত ভাড়া: ৳{$ride->fare_amount}।",
                 [
                     'ride_id' => (string) $ride->id,
                     'status' => 'completed',
