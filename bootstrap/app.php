@@ -1,7 +1,9 @@
 <?php
 
+use App\Http\Middleware\AdminAuthenticate;
 use App\Http\Middleware\BotProtectionMiddleware;
 use App\Http\Middleware\CorsAndPrivateNetworkMiddleware;
+use App\Http\Middleware\RedirectIfAdminAuthenticated;
 use App\Http\Middleware\RobotsMetaMiddleware;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -30,6 +32,8 @@ return Application::configure(basePath: dirname(__DIR__))
             BotProtectionMiddleware::class,
         ]);
         $middleware->alias([
+            'admin.auth' => AdminAuthenticate::class,
+            'admin.guest' => RedirectIfAdminAuthenticated::class,
             'bot.protection' => BotProtectionMiddleware::class,
             'robots.meta' => RobotsMetaMiddleware::class,
         ]);
