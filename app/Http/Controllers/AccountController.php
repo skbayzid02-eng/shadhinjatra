@@ -36,7 +36,7 @@ class AccountController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $savedPlaces = SavedPlace::where('user_id', $user->id)->get(['id', 'name', 'address', 'latitude', 'longitude', 'type']);
+        $savedPlaces = SavedPlace::where('user_id', $user->id)->get(['id', 'name', 'address', 'latitude', 'longitude', 'icon']);
         $completedRidesCount = Ride::where('user_id', $user->id)->where('status', 'COMPLETED')->count();
         $unreadCount = Notification::where('user_id', $user->id)->where('is_read', false)->count();
 

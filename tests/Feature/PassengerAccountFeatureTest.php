@@ -277,6 +277,52 @@ class PassengerAccountFeatureTest extends TestCase
             ]);
     }
 
+    public function test_it_handles_saved_places_in_account_and_endpoints(): void
+    {
+        $user = $this->createUser();
+        Sanctum::actingAs($user);
+
+        // Create saved places
+        \App\Models\SavedPlace::create([
+            'user_id' => $user->id,
+            'name' => 'Home',
+            'address' => 'Dhanmondi 27, Dhaka',
+            'icon' => 'home',
+        ]);
+        \App\Models\SavedPlace::create([
+            'user_id' => $user->id,
+            'name' => 'Work',
+            'address' => 'Gulshan 2, Dhaka',
+            'icon' => 'work',
+        ]);
+
+        // Account endpoint should load saved places without error 500
+        $accountRes = $this->getJson('/api/account');
+        $accountRes->assertStatus(200)
+            ->assertJson(['success' => true])
+            ->assertJsonCount(2, 'data.saved_places');
+
+        // Test saved places endpoint
+        $placesRes = $this->getJson('/api/account/places');
+        $placesRes->assertStatus(200)
+            ->assertJson(['success' => true])
+            ->assertJsonCount(2, 'data');
+
+        // Add a new place
+        $addRes = $this->postJson('/api/account/places', [
+            'name' => 'Gym',
+            'address' => 'Banani, Dhaka',
+            'icon' => 'favorite',
+        ]);
+        $addRes->assertStatus(201);
+        $placeId = $addRes->json('data.id');
+
+        // Delete the place
+        $delRes = $this->deleteJson('/api/account/places/' . $placeId);
+        $delRes->assertStatus(200);
+        $this->assertDatabaseMissing('saved_places', ['id' => $placeId]);
+    }
+
     public function test_it_deletes_account(): void
     {
         $user = $this->createUser();

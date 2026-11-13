@@ -4,7 +4,7 @@ import 'package:shadhinjatra/services/auth_service.dart';
 import 'package:shadhinjatra/screens/home_screen.dart';
 import 'package:shadhinjatra/screens/services_screen.dart';
 import 'package:shadhinjatra/screens/activity_screen.dart';
-import 'package:shadhinjatra/screens/account_screen.dart';
+import 'package:shadhinjatra/screens/account/account_dashboard.dart';
 
 class MainNavigation extends StatefulWidget {
   final int initialIndex;
@@ -32,7 +32,7 @@ class _MainNavigationState extends State<MainNavigation> {
       HomeScreen(initialVehicleType: widget.initialVehicleType),
       const ServicesScreen(),
       const ActivityScreen(),
-      const AccountScreen(),
+      const AccountDashboard(),
     ];
     _setupFirebaseMessaging();
   }
