@@ -29,6 +29,7 @@ class Ride extends Model
         'vehicle_type',
         'distance_km',
         'fare_amount',
+        'estimated_fare',
         'base_fare',
         'distance_fare',
         'time_fare',
@@ -127,6 +128,11 @@ class Ride extends Model
     public function rejections()
     {
         return $this->hasMany(DriverRideRejection::class, 'ride_id');
+    }
+
+    public function auditLogs()
+    {
+        return $this->hasMany(RideAuditLog::class, 'ride_id')->latest();
     }
 
     public function getFareAttribute(): float

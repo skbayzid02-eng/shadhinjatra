@@ -50,15 +50,47 @@ class RideRequestController extends Controller
         $category = VehicleCategory::where('name', $vehicleName)->first();
         $meta = VehicleCategoryController::getVehicleMetadata($vehicleName);
 
+        // 1. Base Fare
         $baseFare = (float) ($category?->base_fare ?? 50.0);
+        // 2. Per KM Fare
         $perKm = (float) ($category?->per_km_rate ?? 20.0);
+        // 3. Per Minute Fare
         $perMin = (float) ($category?->per_min_rate ?? 2.0);
+        // 4. Minimum Fare
         $minFare = (float) ($category?->min_fare ?? 80.0);
+        // 5. Cancellation Fee
+        $cancellationFee = (float) ($category?->cancellation_fee ?? 30.0);
+        // 6. Waiting Charge per min
+        $waitingChargePerMin = (float) ($category?->waiting_charge_per_min ?? 2.0);
+
+        // 7. Extra Distance Charge
+        $extraDistanceFare = 0.0;
+        $thresholdKm = (float) ($category?->extra_distance_threshold_km ?? 15.0);
+        if ($distanceKm > $thresholdKm && ($category?->extra_distance_charge ?? 0) > 0) {
+            $extraDistanceFare = round(($distanceKm - $thresholdKm) * (float) $category->extra_distance_charge, 2);
+        }
+
+        // 8. Night Charge (11 PM to 6 AM)
+        $nightCharge = 0.0;
+        if ($category?->night_charge_enabled) {
+            $currentHour = now()->hour;
+            if ($currentHour >= 23 || $currentHour < 6) {
+                if (($category->night_charge_amount ?? 0) > 0) {
+                    $nightCharge = (float) $category->night_charge_amount;
+                } else {
+                    $nightCharge = round(($baseFare + ($distanceKm * $perKm)) * ((float) ($category->night_charge_percent ?? 15.0) / 100.0), 2);
+                }
+            }
+        }
+
+        // 9. Special Area Fare (if specified or detected)
+        $specialAreaFare = (float) ($category?->special_area_fare ?? 0.0);
 
         $distanceFare = round($distanceKm * $perKm, 2);
         $timeFare = round($durationMins * $perMin, 2);
         $bookingFee = 15.00; // Platform service fee
-        $rawFare = $baseFare + $distanceFare + $timeFare;
+        $additionalCharges = $extraDistanceFare + $nightCharge + $specialAreaFare;
+        $rawFare = $baseFare + $distanceFare + $timeFare + $additionalCharges;
         $totalFare = max($minFare, round($rawFare));
 
         return response()->json([
@@ -90,7 +122,11 @@ class RideRequestController extends Controller
                     'distance_fare' => $distanceFare,
                     'time_fare' => $timeFare,
                     'booking_fee' => $bookingFee,
-                    'additional_charges' => 0.00,
+                    'additional_charges' => $additionalCharges,
+                    'extra_distance_fare' => $extraDistanceFare,
+                    'night_charge' => $nightCharge,
+                    'special_area_fare' => $specialAreaFare,
+                    'waiting_charge_per_min' => $waitingChargePerMin,
                     'total_fare' => $totalFare,
                     'formatted_fare' => "৳{$totalFare}",
                     'min_fare' => $minFare,
@@ -130,11 +166,11 @@ class RideRequestController extends Controller
                 'cancellation_policy' => [
                     'title' => 'বুকিং বাতিলের নিয়ম',
                     'free_cancellation_mins' => 5,
-                    'cancellation_fee' => 30.00,
-                    'formatted_cancellation_fee' => '৳৩০',
+                    'cancellation_fee' => $cancellationFee,
+                    'formatted_cancellation_fee' => "৳{$cancellationFee}",
                     'rules' => [
                         'রাইড রিকোয়েস্ট নিশ্চিত করার পর ড্রাইভার আসার প্রথম ৫ মিনিট সম্পূর্ণ বিনামূল্যে বাতিল করা যাবে।',
-                        'ড্রাইভার পিকআপ লোকেশনে পৌঁছানোর পর বা ৫ মিনিট অতিক্রান্ত হওয়ার পর বাতিল করলে ড্রাইভার ক্ষতিপূরণ বাবদ ৳৩০ বাতিল ফি প্রযোজ্য হতে পারে।',
+                        "ড্রাইভার পিকআপ লোকেশনে পৌঁছানোর পর বা ৫ মিনিট অতিক্রান্ত হওয়ার পর বাতিল করলে ড্রাইভার ক্ষতিপূরণ বাবদ ৳{$cancellationFee} বাতিল ফি প্রযোজ্য হতে পারে।",
                         'ড্রাইভার যদি নির্ধারিত সময়ের চেয়ে অনেক বেশি দেরি করে, তবে যাত্রী কোনো ফি ছাড়াই রাইড বাতিল করতে পারবেন।',
                         'যেকোনো সহযোগিতার জন্য আমাদের হেল্প ও ২৪/৭ জরুরি সহায়তা লাইনে যোগাযোগ করতে পারেন।'
                     ],

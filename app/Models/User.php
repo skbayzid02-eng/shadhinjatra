@@ -13,7 +13,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'phone', 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation', 'address', 'password', 'avatar', 'wallet_balance', 'default_payment_method', 'data_sharing', 'profile_visible', 'is_online', 'online_since', 'latitude', 'longitude', 'heading', 'speed', 'accuracy', 'last_location_updated_at', 'vehicle_type', 'vehicle_model', 'vehicle_number', 'vehicle_color', 'vehicle_status', 'rating', 'total_ratings', 'is_verified', 'verification_status', 'documents_verified', 'subscription_status', 'subscription_expires_at', 'last_seen_at', 'push_notifications', 'sms_notifications', 'language', 'theme', 'map_style', 'traffic_view', 'two_step_verification', 'fcm_token'])]
+#[Fillable(['name', 'email', 'account_status', 'status_reason', 'phone', 'nid_number', 'nid_photo', 'driving_license_number', 'driving_license_expiry', 'driving_license_photo', 'vehicle_registration_number', 'vehicle_registration_photo', 'vehicle_fitness_number', 'vehicle_fitness_expiry', 'vehicle_insurance_number', 'vehicle_insurance_expiry', 'vehicle_photo', 'rejection_reason', 'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relation', 'address', 'password', 'avatar', 'wallet_balance', 'default_payment_method', 'data_sharing', 'profile_visible', 'is_online', 'online_since', 'latitude', 'longitude', 'heading', 'speed', 'accuracy', 'last_location_updated_at', 'vehicle_type', 'vehicle_model', 'vehicle_number', 'vehicle_color', 'vehicle_status', 'rating', 'total_ratings', 'is_verified', 'verification_status', 'documents_verified', 'subscription_status', 'subscription_expires_at', 'last_seen_at', 'push_notifications', 'sms_notifications', 'language', 'theme', 'map_style', 'traffic_view', 'two_step_verification', 'fcm_token'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -32,6 +32,9 @@ class User extends Authenticatable
             'subscription_expires_at' => 'datetime',
             'last_seen_at' => 'datetime',
             'last_location_updated_at' => 'datetime',
+            'driving_license_expiry' => 'date',
+            'vehicle_fitness_expiry' => 'date',
+            'vehicle_insurance_expiry' => 'date',
             'heading' => 'float',
             'speed' => 'float',
             'accuracy' => 'float',
@@ -126,6 +129,16 @@ class User extends Authenticatable
     }
 
     /**
+     * Get wallet security audit logs for this user.
+     *
+     * @return HasMany<WalletAuditLog, User>
+     */
+    public function walletAuditLogs(): HasMany
+    {
+        return $this->hasMany(WalletAuditLog::class, 'user_id');
+    }
+
+    /**
      * Get rides assigned to the driver.
      *
      * @return HasMany<Ride, User>
@@ -133,6 +146,46 @@ class User extends Authenticatable
     public function driverRides(): HasMany
     {
         return $this->hasMany(Ride::class, 'driver_id');
+    }
+
+    /**
+     * Get rides booked by the passenger.
+     *
+     * @return HasMany<Ride, User>
+     */
+    public function rides(): HasMany
+    {
+        return $this->hasMany(Ride::class, 'user_id');
+    }
+
+    /**
+     * Alias for passenger rides.
+     *
+     * @return HasMany<Ride, User>
+     */
+    public function passengerRides(): HasMany
+    {
+        return $this->hasMany(Ride::class, 'user_id');
+    }
+
+    /**
+     * Get complaints/safety reports filed by the passenger.
+     *
+     * @return HasMany<SafetyReport, User>
+     */
+    public function safetyReports(): HasMany
+    {
+        return $this->hasMany(SafetyReport::class, 'reporter_id');
+    }
+
+    /**
+     * Get emergency SOS alerts triggered by the user.
+     *
+     * @return HasMany<SosAlert, User>
+     */
+    public function sosAlerts(): HasMany
+    {
+        return $this->hasMany(SosAlert::class, 'user_id');
     }
 
     /**

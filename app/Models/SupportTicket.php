@@ -25,10 +25,28 @@ class SupportTicket extends Model
     protected $fillable = [
         'ticket_id',
         'user_id',
+        'ride_id',
+        'complainant_type',
         'category',
+        'priority',
         'subject',
         'message',
+        'evidence_photo',
+        'assigned_agent',
         'status',
+        'admin_reply',
+        'replied_at',
+        'activity_log',
+    ];
+
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array<string, string>
+     */
+    protected $casts = [
+        'replied_at' => 'datetime',
+        'activity_log' => 'array',
     ];
 
     /**
@@ -40,5 +58,32 @@ class SupportTicket extends Model
     {
         return $this->belongsTo(User::class);
     }
-}
 
+    /**
+     * Get the ride associated with this complaint (if any).
+     *
+     * @return BelongsTo<Ride, covariant SupportTicket>
+     */
+    public function ride(): BelongsTo
+    {
+        return $this->belongsTo(Ride::class);
+    }
+
+    /**
+     * Log an activity item to the complaint history timeline.
+     */
+    public function logActivity(string $action, string $description, ?string $actor = 'Super Admin'): void
+    {
+        $currentLog = is_array($this->activity_log) ? $this->activity_log : [];
+        $currentLog[] = [
+            'action' => $action,
+            'description' => $description,
+            'actor' => $actor,
+            'timestamp' => now()->toIso8601String(),
+            'formatted_time' => now()->format('d M Y, h:i A'),
+        ];
+
+        $this->activity_log = $currentLog;
+        $this->save();
+    }
+}
