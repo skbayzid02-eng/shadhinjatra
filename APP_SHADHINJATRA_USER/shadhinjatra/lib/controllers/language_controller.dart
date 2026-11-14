@@ -7,12 +7,12 @@ import 'package:shadhinjatra/services/auth_service.dart';
 class LanguageController extends GetxController {
   static LanguageController get to => Get.find<LanguageController>();
 
-  final RxString currentLanguageCode = 'bn'.obs;
+  final RxString currentLanguageCode = 'en'.obs;
   static const String _langPrefKey = 'user_selected_language';
 
   final Map<String, String> supportedLanguages = const {
-    'bn': '🇧🇩 বাংলা — Bangla',
     'en': '🇬🇧 English — ইংরেজি',
+    'bn': '🇧🇩 বাংলা — Bangla',
     'hi': '🇮🇳 हिन्दी — Hindi',
     'ar': '🇸🇦 العربية — Arabic',
     'es': '🇪🇸 Español — Spanish',
@@ -34,9 +34,11 @@ class LanguageController extends GetxController {
   Future<void> loadLanguagePreference() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final savedLang = prefs.getString(_langPrefKey);
+      final savedLang = prefs.getString(_langPrefKey) ?? prefs.getString('language');
       if (savedLang != null && supportedLanguages.containsKey(savedLang)) {
         currentLanguageCode.value = savedLang;
+      } else {
+        currentLanguageCode.value = 'en';
       }
     } catch (e) {
       debugPrint('LanguageController load error: $e');
@@ -63,10 +65,12 @@ class LanguageController extends GetxController {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_langPrefKey, code);
+      await prefs.setString('language', code);
     } catch (_) {}
 
     // 4. Sync with backend API
-    AuthService.updateLanguage(code).catchError((_) => {});
+    AuthService.updateLanguage(code).catchError((_) => <String, dynamic>{});
+    AuthService.updateAccountLanguage(code).catchError((_) => <String, dynamic>{});
   }
 }
 

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:shadhinjatra/controllers/language_controller.dart';
+import 'package:shadhinjatra/screens/home/home_localization.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -23,6 +26,18 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  String get _currentLangCode {
+    try {
+      if (Get.isRegistered<LanguageController>()) {
+        return LanguageController.to.currentLanguageCode.value;
+      }
+    } catch (_) {}
+    return 'en';
+  }
+
+  String _t(String key) {
+    return HomeLocalization.get(key, langCode: _currentLangCode);
+  }
   final MapController _mapController = MapController();
   final TextEditingController _pickupController = TextEditingController();
   final TextEditingController _dropoffController = TextEditingController();
@@ -3411,7 +3426,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return Obx(() {
+      final lang = _currentLangCode;
+      final isRtl = lang == 'ar';
+
+      return Directionality(
+        textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+        child: Scaffold(
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
@@ -4140,7 +4161,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
-    );
+        ),
+      );
+    });
   }
 
   Widget _buildFloatingIcon({
@@ -4376,7 +4399,7 @@ class _HomeScreenState extends State<HomeScreen> {
       (v) => v['name'] == _selectedVehicle,
       orElse: () => _vehicles.first,
     );
-    final activeVehicleBn = activeVehicle['name_bn'] ?? _selectedVehicle;
+    final activeVehicleBn = HomeLocalization.getVehicleName(activeVehicle['name']?.toString() ?? '', langCode: _currentLangCode);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
@@ -4418,7 +4441,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   Text(
-                    'আপনার সুবিধাজনক গাড়ি নির্বাচন করুন',
+                    _t('select_vehicle_prompt'),
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade400, fontWeight: FontWeight.w500),
                   ),
                 ],
@@ -4435,7 +4458,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const Icon(Icons.navigation_rounded, size: 13, color: Colors.amberAccent),
                     const SizedBox(width: 4),
                     Text(
-                      '$_durationMins মিনিট • $_distanceKm কি.মি.',
+                      '$_durationMins ${_t('mins_unit')} • $_distanceKm ${_t('km_unit')}',
                       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 11, color: Colors.white),
                     ),
                   ],
@@ -4467,8 +4490,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 final String dropoffEta = v['dropoff_eta_time']?.toString() ??
                     '${DateTime.now().add(Duration(minutes: _durationMins)).hour.toString().padLeft(2, '0')}:${DateTime.now().add(Duration(minutes: _durationMins)).minute.toString().padLeft(2, '0')}';
                 final String pickupEta = v['pickup_eta_text']?.toString() ??
-                    (hasDrivers ? '${v['eta_minutes'] ?? 2} মিনিটে আসবে' : 'নিকটস্থ গাড়ি নেই');
-                final String distanceText = v['distance_text']?.toString() ?? '$_distanceKm কি.মি.';
+                    (hasDrivers ? '${v['eta_minutes'] ?? 2} ${_t('mins_unit')} ${_t('arrives_in')}' : _t('no_drivers_available'));
+                final String distanceText = v['distance_text']?.toString() ?? '$_distanceKm ${_t('km_unit')}';
                 final String badgeText = v['badge']?.toString() ?? '';
                 final int origFare = (v['original_fare'] as num?)?.toInt() ?? (fare * 1.15).round();
 
@@ -4743,14 +4766,14 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 const Icon(Icons.verified_rounded, size: 16, color: Colors.amberAccent),
                 const SizedBox(width: 8),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'স্বাধীনযাত্রা গ্যারান্টি • ১৫% সাশ্রয়ী ও নিরাপদ যাত্রা',
-                    style: TextStyle(color: Colors.white70, fontSize: 11.5, fontWeight: FontWeight.w600),
+                    _t('guarantee_badge'),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11.5, fontWeight: FontWeight.w600),
                   ),
                 ),
                 Text(
-                  'নিরাপদ রাইড',
+                  _t('safe_ride_badge'),
                   style: TextStyle(color: Colors.amberAccent.shade100, fontSize: 11, fontWeight: FontWeight.bold),
                 ),
               ],
@@ -4762,19 +4785,19 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               _buildPaymentOption(
-                label: 'Cash (নগদ)',
+                label: _t('payment_cash'),
                 method: 'cash',
                 icon: Icons.money_rounded,
               ),
               const SizedBox(width: 8),
               _buildPaymentOption(
-                label: 'Wallet (ওয়ালেট)',
+                label: _t('payment_wallet'),
                 method: 'wallet',
                 icon: Icons.account_balance_wallet_rounded,
               ),
               const SizedBox(width: 8),
               _buildPaymentOption(
-                label: 'Online (অনলাইন)',
+                label: _t('payment_online'),
                 method: 'online',
                 icon: Icons.credit_card_rounded,
               ),
@@ -4795,7 +4818,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const Icon(Icons.info_outline_rounded, size: 14, color: Colors.white70),
                     const SizedBox(width: 5),
                     Text(
-                      'See Fare Breakdown • ভাড়ার বিস্তারিত বিবরণ',
+                      _t('see_fare_breakdown'),
                       style: TextStyle(
                         color: Colors.grey.shade300,
                         fontSize: 11.5,
@@ -4834,7 +4857,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         const Icon(Icons.directions_car_filled_rounded, size: 20, color: Colors.black),
                         const SizedBox(width: 8),
                         Text(
-                          'গাড়ি নির্বাচন করুন ($activeVehicleBn)',
+                          '${_t('select_vehicle_btn')} ($activeVehicleBn)',
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
                         ),
                         if (_fareAmount > 0) ...[
@@ -4899,7 +4922,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openBookingReviewModal() {
     if (_pickupController.text.trim().isEmpty || _dropoffController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('অনুগ্রহ করে পিকআপ ও গন্তব্য নির্ধারণ করুন')),
+        SnackBar(content: Text(_t('select_pickup_dropoff_first'))),
       );
       return;
     }
@@ -4909,7 +4932,7 @@ class _HomeScreenState extends State<HomeScreen> {
       orElse: () => _vehicles.first,
     );
     final String vName = vehicle['name']?.toString() ?? 'Private Car';
-    final String vNameBn = vehicle['name_bn']?.toString() ?? vName;
+    final String vNameBn = HomeLocalization.getVehicleName(vName, langCode: _currentLangCode);
     final String capacityBn = vehicle['capacity_bn']?.toString() ?? (vehicle['capacity']?.toString() ?? '৪ সিট');
     final String badgeText = vehicle['badge']?.toString() ?? '';
     final breakdown = _getFareBreakdown(vehicle);
@@ -4952,12 +4975,12 @@ class _HomeScreenState extends State<HomeScreen> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  'Confirm Booking',
+                                Text(
+                                  _t('confirm_booking_btn'),
                                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.white),
                                 ),
                                 Text(
-                                  'বুকিং ও ভাড়ার বিস্তারিত বিবরণ',
+                                  _t('booking_details_title'),
                                   style: TextStyle(fontSize: 12, color: Colors.grey.shade400, fontWeight: FontWeight.w500),
                                 ),
                               ],
@@ -5025,9 +5048,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          const Text(
-                                            'পিকআপ ঠিকানা (Pickup)',
-                                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.greenAccent),
+                                          Text(
+                                            _t('pickup_address_label'),
+                                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.greenAccent),
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
@@ -5063,9 +5086,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          const Text(
-                                            'গন্তব্য ঠিকানা (Destination)',
-                                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.redAccent),
+                                          Text(
+                                            _t('dropoff_address_label'),
+                                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.redAccent),
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
@@ -5148,7 +5171,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           const SizedBox(width: 12),
                                           const Icon(Icons.timer_rounded, size: 13, color: Colors.cyanAccent),
                                           const SizedBox(width: 4),
-                                          Text('$_durationMins মিনিট', style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+                                          Text('$_durationMins ${_t('mins_unit')}', style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
                                         ],
                                       ),
                                     ],
@@ -5180,27 +5203,27 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Row(
+                                Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
+                                    const Text(
                                       'Fare Breakdown',
                                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white),
                                     ),
                                     Text(
-                                      'ভাড়ার হিসাব',
-                                      style: TextStyle(fontSize: 12, color: Colors.white54, fontWeight: FontWeight.w500),
+                                      _t('fare_calculation'),
+                                      style: const TextStyle(fontSize: 12, color: Colors.white54, fontWeight: FontWeight.w500),
                                     ),
                                   ],
                                 ),
                                 const SizedBox(height: 12),
-                                _buildFareRow(Icons.pin_drop_outlined, 'দূরত্ব ভাড়া (Distance)', '৳${breakdown['distance_fare']!.toStringAsFixed(0)}'),
+                                _buildFareRow(Icons.pin_drop_outlined, _t('distance_fare'), '৳${breakdown['distance_fare']!.toStringAsFixed(0)}'),
                                 const SizedBox(height: 8),
-                                _buildFareRow(Icons.payments_outlined, 'বেস ফেয়ার (Base Fare)', '৳${breakdown['base_fare']!.toStringAsFixed(0)}'),
+                                _buildFareRow(Icons.payments_outlined, _t('base_fare'), '৳${breakdown['base_fare']!.toStringAsFixed(0)}'),
                                 const SizedBox(height: 8),
-                                _buildFareRow(Icons.access_time_rounded, 'সময় ভাড়া (Time Fare)', '৳${breakdown['time_fare']!.toStringAsFixed(0)}'),
+                                _buildFareRow(Icons.access_time_rounded, _t('time_fare'), '৳${breakdown['time_fare']!.toStringAsFixed(0)}'),
                                 const SizedBox(height: 8),
-                                _buildFareRow(Icons.security_rounded, 'প্ল্যাটফর্ম ও বুকিং ফি (Booking Fee)', '৳${breakdown['booking_fee']!.toStringAsFixed(0)}'),
+                                _buildFareRow(Icons.security_rounded, _t('booking_fee'), '৳${breakdown['booking_fee']!.toStringAsFixed(0)}'),
                                 const Padding(
                                   padding: EdgeInsets.symmetric(vertical: 10),
                                   child: Divider(color: Colors.white24, height: 1),
@@ -5208,9 +5231,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    const Text(
-                                      'Total Fare (সর্বমোট ভাড়া)',
-                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white),
+                                    Text(
+                                      _t('total_fare'),
+                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white),
                                     ),
                                     Text(
                                       '৳${breakdown['total_fare']!.toStringAsFixed(0)}',
@@ -5224,9 +5247,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           const SizedBox(height: 14),
 
                           // 7. Payment Method Selection
-                          const Text(
-                            'পেমেন্ট পদ্ধতি নির্বাচন করুন:',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
+                          Text(
+                            _t('select_payment_method'),
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
                           ),
                           const SizedBox(height: 8),
                           Row(
@@ -5256,9 +5279,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           const SizedBox(height: 14),
 
                           // 8. Special Instructions for Driver (Optional)
-                          const Text(
-                            'যাত্রীর বিশেষ নির্দেশনা (ঐচ্ছিক):',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
+                          Text(
+                            _t('special_notes_label'),
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
                           ),
                           const SizedBox(height: 8),
                           TextField(
@@ -5266,7 +5289,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             maxLines: 2,
                             style: const TextStyle(color: Colors.white, fontSize: 13),
                             decoration: InputDecoration(
-                              hintText: 'ড্রাইভারের উদ্দেশ্যে বিশেষ কোনো বার্তা (যেমন: গেট ২ এর সামনে আছি, ফোন দিন)...',
+                              hintText: _t('special_notes_hint'),
                               hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: 12),
                               filled: true,
                               fillColor: const Color(0xFF1E1E22),
@@ -5290,22 +5313,22 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Row(
+                                Row(
                                   children: [
-                                    Icon(Icons.verified_user_rounded, color: Colors.amberAccent, size: 18),
-                                    SizedBox(width: 8),
+                                    const Icon(Icons.verified_user_rounded, color: Colors.amberAccent, size: 18),
+                                    const SizedBox(width: 8),
                                     Text(
-                                      'বুকিং বাতিলের নিয়ম (Cancellation Policy)',
-                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                                      _t('cancellation_policy'),
+                                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
                                     ),
                                   ],
                                 ),
                                 const SizedBox(height: 8),
-                                _buildPolicyBullet('রাইড নিশ্চিত করার প্রথম ৫ মিনিট সম্পূর্ণ বিনামূল্যে বাতিল করা যাবে।'),
+                                _buildPolicyBullet(_t('cancel_rule_1')),
                                 const SizedBox(height: 4),
-                                _buildPolicyBullet('ড্রাইভার পিকআপ পয়েন্টে পৌঁছানোর পর বাতিল করলে ক্ষতিপূরণ ফি (৳৩০) প্রযোজ্য হতে পারে।'),
+                                _buildPolicyBullet(_t('cancel_rule_2')),
                                 const SizedBox(height: 4),
-                                _buildPolicyBullet('ড্রাইভার অতিরিক্ত দেরি করলে বা কোনো অনাকাঙ্ক্ষিত কারণে কোনো ফি ছাড়াই বাতিল করা যাবে।'),
+                                _buildPolicyBullet(_t('cancel_rule_3')),
                               ],
                             ),
                           ),
@@ -5340,7 +5363,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         const Icon(Icons.check_circle_rounded, size: 20, color: Colors.white),
                                         const SizedBox(width: 8),
                                         Text(
-                                          'Confirm Booking (রাইড নিশ্চিত করুন • ৳${breakdown['total_fare']!.toStringAsFixed(0)})',
+                                          '${_t('confirm_booking_btn')} (৳${breakdown['total_fare']!.toStringAsFixed(0)})',
                                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white),
                                         ),
                                       ],
@@ -5439,14 +5462,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final int secondsRem = dispatch?['seconds_remaining'] is int 
         ? dispatch!['seconds_remaining'] 
         : (int.tryParse(dispatch?['seconds_remaining']?.toString() ?? '15') ?? 15);
-    final String radiusText = dispatch?['search_radius_text']?.toString() ?? '৫ কিমি এলাকা';
+    final String _ = dispatch?['search_radius_text']?.toString() ?? '৫ কিমি এলাকা';
     final double radiusKm = (dispatch?['search_radius_km'] as num?)?.toDouble() ?? 5.0;
 
     final vehicle = _vehicles.firstWhere(
       (v) => v['name'] == _selectedVehicle,
       orElse: () => _vehicles.first,
     );
-    final String vehicleNameBn = vehicle['name_bn'] ?? _selectedVehicle;
+    final String vehicleNameBn = HomeLocalization.getVehicleName(vehicle['name']?.toString() ?? '', langCode: _currentLangCode);
     final String vehicleNameEn = vehicle['name_en'] ?? _selectedVehicle;
     final IconData vehicleIcon = _getVehicleIcon(vehicle['icon']?.toString(), _selectedVehicle);
 
@@ -5617,7 +5640,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           const Icon(Icons.radar_rounded, size: 14, color: Color(0xFF1D4ED8)),
                           const SizedBox(width: 4),
                           Text(
-                            'সার্চ পরিধি: $radiusText (${radiusKm.toInt()} কি.মি.)',
+                            '${_t('search_radius')} ${radiusKm.toInt()} ${_t('km_unit')}',
                             style: const TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
@@ -5640,7 +5663,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           const Icon(Icons.timer_outlined, size: 14, color: Color(0xFF15803D)),
                           const SizedBox(width: 4),
                           Text(
-                            'রেসপন্স: $secondsRem সে. (চেষ্টা #$attempt)',
+                            '${_t('response_time')} ${secondsRem}s (#$attempt)',
                             style: const TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
@@ -5826,14 +5849,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: const Color(0xFFFDE68A)),
                   ),
-                  child: const Row(
+                  child: Row(
                     children: [
-                      Icon(Icons.info_outline_rounded, size: 15, color: Color(0xFFB45309)),
-                      SizedBox(width: 6),
+                      const Icon(Icons.info_outline_rounded, size: 15, color: Color(0xFFB45309)),
+                      const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          'প্রথম চালক গ্রহণ না করলে ৫ ➔ ১০ ➔ ১৫ ➔ ২০ কিমি এলাকার মধ্যে স্বয়ংক্রিয়ভাবে পরবর্তী চালকের কাছে রিকোয়েস্ট যাবে।',
-                          style: TextStyle(
+                          _t('auto_dispatch_note'),
+                          style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF92400E),
@@ -5862,14 +5885,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     onPressed: () => _cancelActiveRide(),
-                    child: const Row(
+                    child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.close_rounded, size: 18, color: Colors.red),
-                        SizedBox(width: 6),
+                        const Icon(Icons.close_rounded, size: 18, color: Colors.red),
+                        const SizedBox(width: 6),
                         Text(
-                          'Cancel (বুকিং বাতিল করুন)',
-                          style: TextStyle(
+                          _t('cancel_booking_btn'),
+                          style: const TextStyle(
                             fontSize: 14.5,
                             fontWeight: FontWeight.w800,
                             color: Colors.red,
@@ -5891,11 +5914,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final driver = _activeRideTracking?['driver'] as Map<String, dynamic>?;
     final trip = _activeRideTracking?['trip'] as Map<String, dynamic>?;
     final status = _activeRideTracking?['status'] as String? ?? 'accepted';
-    final statusLabel = _activeRideTracking?['status_label'] as String? ?? 'ড্রাইভার পিকআপের পথে আসছেন';
+    final statusLabel = (status == 'arrived') ? _t('driver_arrived') : ((status == 'started') ? _t('trip_in_progress') : _t('driver_en_route'));
     final otp = _activeRideTracking?['otp']?.toString() ?? '----';
     final eta = driver?['eta_text']?.toString() ?? (driver?['eta_minutes'] != null ? '${driver!['eta_minutes']} মিনিট' : 'শীঘ্রই');
     final distanceRem = driver?['distance_remaining']?.toString() ?? (driver?['distance_km'] != null ? '${driver!['distance_km']} কিমি' : '');
-    final driverName = driver?['name']?.toString() ?? 'ড্রাইভার';
+    final driverName = driver?['name']?.toString() ?? _t('driver');
     final driverPhone = driver?['phone']?.toString() ?? '';
     final driverAvatar = driver?['avatar']?.toString() ?? driver?['photo_url']?.toString();
     final double rating = (driver?['rating'] as num?)?.toDouble() ?? 5.0;
@@ -6700,7 +6723,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  status == 'started' ? 'বাকি দূরত্ব (বাকি পথ)' : 'ড্রাইভারের দূরত্ব',
+                                  status == 'started' ? _t('remaining_distance') : _t('remaining_distance'),
                                   style: const TextStyle(fontSize: 10, color: Color(0xFF166534), fontWeight: FontWeight.bold),
                                 ),
                                 Text(
@@ -6721,7 +6744,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  status == 'started' ? 'পৌঁছাতে সময় (ETA)' : 'পিকআপ সময়',
+                                  status == 'started' ? _t('remaining_time') : _t('remaining_time'),
                                   style: const TextStyle(fontSize: 10, color: Color(0xFF166534), fontWeight: FontWeight.bold),
                                 ),
                                 Text(
@@ -6796,7 +6819,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           onPressed: driverPhone.isNotEmpty ? () => _callDriver(driverPhone) : null,
                           icon: const Icon(Icons.call, size: 16),
-                          label: const Text('কল করুন', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                          label: Text(_t('call_driver'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -6819,7 +6842,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             }
                           },
                           icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
-                          label: const Text('মেসেজ', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                          label: Text(_t('chat'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -6835,7 +6858,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           onPressed: () => _viewDriverLiveLocation(),
                           icon: const Icon(Icons.my_location_rounded, size: 16),
-                          label: const Text('লাইভ ম্যাপ', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                          label: Text(_t('live_map'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
                         ),
                       ),
                     ],
@@ -6860,7 +6883,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             onPressed: () => _showChangeDestinationSheet(),
                             icon: const Icon(Icons.edit_location_alt_rounded, size: 16),
-                            label: const Text('গন্তব্য পরিবর্তন', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                            label: Text(_t('change_destination'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -6876,7 +6899,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             onPressed: () => _showShareTripSheet(),
                             icon: const Icon(Icons.share_rounded, size: 16),
-                            label: const Text('পরিবারকে শেয়ার', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                            label: Text(_t('share_trip'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
                           ),
                         ),
                       ],
@@ -6897,7 +6920,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             onPressed: () => _showSafetyAssistanceSheet(),
                             icon: const Icon(Icons.shield_rounded, size: 17, color: Colors.white),
-                            label: const Text('জরুরি SOS ও নিরাপত্তা', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                            label: Text(_t('safety_sos'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -6913,7 +6936,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             onPressed: () => _cancelActiveRide(),
                             icon: const Icon(Icons.cancel_outlined, size: 15, color: Color(0xFFDC2626)),
-                            label: const Text('বাতিল', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                            label: Text(_t('cancel_ride'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
                           ),
                         ),
                       ],
@@ -6934,7 +6957,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             onPressed: () => _showSafetyAssistanceSheet(),
                             icon: const Icon(Icons.shield_outlined, size: 17, color: Color(0xFFD97706)),
-                            label: const Text('নিরাপত্তা সহায়তা', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                            label: Text(_t('safety_sos'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -6950,7 +6973,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             onPressed: () => _cancelActiveRide(),
                             icon: const Icon(Icons.cancel_outlined, size: 17, color: Color(0xFFDC2626)),
-                            label: const Text('রাইড বাতিল করুন', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                            label: Text(_t('cancel_ride'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
                           ),
                         ),
                       ],
@@ -8129,7 +8152,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         controller: customReasonCtrl,
                         maxLines: 2,
                         decoration: InputDecoration(
-                          hintText: 'নির্দিষ্ট কারণটি লিখুন...',
+                          hintText: _t('custom_reason_hint'),
                           hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
                           filled: true,
                           fillColor: const Color(0xFFF8FAFC),

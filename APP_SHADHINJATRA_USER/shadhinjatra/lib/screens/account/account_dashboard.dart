@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shadhinjatra/controllers/language_controller.dart';
+import 'package:shadhinjatra/screens/account/account_localization.dart';
 import 'package:shadhinjatra/services/auth_service.dart';
 import 'package:shadhinjatra/screens/account/profile/profile_screen.dart';
 import 'package:shadhinjatra/screens/account/profile/edit_profile_screen.dart';
@@ -32,10 +35,22 @@ class _AccountDashboardState extends State<AccountDashboard> {
   String _userEmail = "";
   String _userPhone = "";
   String _rating = "4.9";
-  String _activeLanguageName = "বাংলা (Bangla)";
   double _walletBalance = 0.0;
   String? _avatarUrl;
   bool _isLoading = true;
+
+  String get _currentLangCode {
+    try {
+      if (Get.isRegistered<LanguageController>()) {
+        return LanguageController.to.currentLanguageCode.value;
+      }
+    } catch (_) {}
+    return 'en';
+  }
+
+  String _t(String key) {
+    return AccountLocalization.get(key, langCode: _currentLangCode);
+  }
 
   @override
   void initState() {
@@ -58,8 +73,12 @@ class _AccountDashboardState extends State<AccountDashboard> {
           _walletBalance = (data['wallet_balance'] as num?)?.toDouble() ?? 0.0;
           _avatarUrl = AuthService.fixImageUrl(data['avatar']);
 
-          final langCode = data['language']?.toString() ?? 'bn';
-          _activeLanguageName = _resolveLanguageName(langCode);
+          final langCode = data['language']?.toString();
+          if (langCode != null && langCode.isNotEmpty && Get.isRegistered<LanguageController>()) {
+            if (LanguageController.to.currentLanguageCode.value != langCode) {
+              LanguageController.to.currentLanguageCode.value = langCode;
+            }
+          }
         });
       }
     } catch (e) {
@@ -96,7 +115,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
       case 'de':
         return 'Deutsch 🇩🇪';
       default:
-        return 'বাংলা 🇧🇩';
+        return 'English 🇬🇧';
     }
   }
 
@@ -113,11 +132,11 @@ class _AccountDashboardState extends State<AccountDashboard> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('প্রোফাইল ছবি (Profile Photo)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Text(_t('photo_modal_title'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 12),
               ListTile(
                 leading: const Icon(Icons.photo_library, color: Colors.deepPurple),
-                title: const Text('গ্যালারি থেকে বেছে নিন (Choose from Gallery)'),
+                title: Text(_t('photo_gallery')),
                 onTap: () {
                   Navigator.pop(sheetCtx);
                   _uploadPhoto(ImageSource.gallery);
@@ -125,7 +144,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
               ),
               ListTile(
                 leading: const Icon(Icons.camera_alt, color: Colors.deepPurple),
-                title: const Text('ক্যামেরা দিয়ে ছবি তুলুন (Take Photo)'),
+                title: Text(_t('photo_camera')),
                 onTap: () {
                   Navigator.pop(sheetCtx);
                   _uploadPhoto(ImageSource.camera);
@@ -134,7 +153,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
               if (_avatarUrl != null && _avatarUrl!.isNotEmpty)
                 ListTile(
                   leading: const Icon(Icons.delete_outline, color: Colors.red),
-                  title: const Text('বর্তমান ছবি মুছে ফেলুন (Remove Photo)', style: TextStyle(color: Colors.red)),
+                  title: Text(_t('photo_remove'), style: const TextStyle(color: Colors.red)),
                   onTap: () {
                     Navigator.pop(sheetCtx);
                     _deletePhoto();
@@ -157,10 +176,10 @@ class _AccountDashboardState extends State<AccountDashboard> {
 
     if (!mounted) return;
     if (res['success'] == true) {
-      messenger.showSnackBar(const SnackBar(content: Text('প্রোফাইল ছবি সফলভাবে আপডেট হয়েছে!')));
+      messenger.showSnackBar(SnackBar(content: Text(_t('photo_updated'))));
       _fetchProfile();
     } else {
-      messenger.showSnackBar(SnackBar(content: Text(res['message']?.toString() ?? 'আপলোড ব্যর্থ হয়েছে')));
+      messenger.showSnackBar(SnackBar(content: Text(res['message']?.toString() ?? 'Upload failed')));
     }
   }
 
@@ -169,10 +188,10 @@ class _AccountDashboardState extends State<AccountDashboard> {
     final res = await AuthService.deleteAvatar();
     if (!mounted) return;
     if (res['success'] == true) {
-      messenger.showSnackBar(const SnackBar(content: Text('প্রোফাইল ছবি মুছে ফেলা হয়েছে')));
+      messenger.showSnackBar(SnackBar(content: Text(_t('photo_deleted'))));
       _fetchProfile();
     } else {
-      messenger.showSnackBar(SnackBar(content: Text(res['message']?.toString() ?? 'মুছতে ব্যর্থ হয়েছে')));
+      messenger.showSnackBar(SnackBar(content: Text(res['message']?.toString() ?? 'Failed to delete')));
     }
   }
 
@@ -236,7 +255,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
                         : () async {
                             final val = ctrl.text.trim();
                             if (val.isEmpty) {
-                              setSheetState(() => errorText = 'অনুগ্রহ করে মানটি প্রদান করুন');
+                              setSheetState(() => errorText = _t('modal_empty_error'));
                               return;
                             }
                             setSheetState(() {
@@ -251,19 +270,19 @@ class _AccountDashboardState extends State<AccountDashboard> {
                             if (res['success'] == true) {
                               navigator.pop();
                               messenger.showSnackBar(
-                                SnackBar(content: Text(res['message']?.toString() ?? 'আপডেট সম্পন্ন হয়েছে!')),
+                                SnackBar(content: Text(res['message']?.toString() ?? 'Updated successfully!')),
                               );
                               _fetchProfile();
                             } else {
                               setSheetState(() {
                                 isSaving = false;
-                                errorText = res['message']?.toString() ?? 'আপডেট ব্যর্থ হয়েছে';
+                                errorText = res['message']?.toString() ?? 'Update failed';
                               });
                             }
                           },
                     child: isSaving
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : const Text('সংরক্ষণ করুন', style: TextStyle(fontWeight: FontWeight.bold)),
+                        : Text(_t('modal_save'), style: const TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -281,14 +300,14 @@ class _AccountDashboardState extends State<AccountDashboard> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('লগআউট নিশ্চিতকরণ'),
-        content: const Text('আপনি কি নিশ্চিত যে Shadhin Jatra অ্যাকাউন্ট থেকে লগআউট করতে চান?'),
+        title: Text(_t('logout_dialog_title')),
+        content: Text(_t('logout_dialog_msg')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('বাতিল')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('cancel'))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('লগআউট'),
+            child: Text(_t('logout')),
           ),
         ],
       ),
@@ -312,33 +331,33 @@ class _AccountDashboardState extends State<AccountDashboard> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('অ্যাকাউন্ট ডিলিট (Delete Account)', style: TextStyle(color: Colors.red)),
+        title: Text(_t('delete_dialog_title'), style: const TextStyle(color: Colors.red)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'সতর্কবার্তা: আপনার অ্যাকাউন্ট মুছে ফেললে আপনার সকল রাইড হিস্ট্রি, ওয়ালেট ব্যালেন্স ও তথ্য স্থায়ীভাবে মুছে যাবে। এটি আর ফিরিয়ে আনা যাবে না।',
-              style: TextStyle(fontSize: 13, color: Colors.black87),
+            Text(
+              _t('delete_dialog_warn'),
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: passwordCtrl,
               obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'নিশ্চিত করতে পাসওয়ার্ড লিখুন',
-                prefixIcon: Icon(Icons.lock_outline),
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: _t('delete_pass_prompt'),
+                prefixIcon: const Icon(Icons.lock_outline),
+                border: const OutlineInputBorder(),
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('বাতিল')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(_t('cancel'))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('স্থায়ীভাবে মুছে ফেলুন'),
+            child: Text(_t('delete_permanent')),
           ),
         ],
       ),
@@ -353,7 +372,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
 
     if (res['success'] == true) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('অ্যাকাউন্ট সফলভাবে স্থায়ীভাবে মুছে ফেলা হয়েছে')),
+        SnackBar(content: Text(_t('delete_success'))),
       );
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
@@ -361,7 +380,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
       context.go('/login');
     } else {
       messenger.showSnackBar(
-        SnackBar(content: Text(res['message']?.toString() ?? 'অ্যাকাউন্ট মুছতে ব্যর্থ হয়েছে'), backgroundColor: Colors.red),
+        SnackBar(content: Text(res['message']?.toString() ?? _t('delete_fail')), backgroundColor: Colors.red),
       );
     }
   }
@@ -372,234 +391,266 @@ class _AccountDashboardState extends State<AccountDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey.shade100,
-      appBar: AppBar(
-        title: const Text('My Account (অ্যাকাউন্ট)', style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.deepPurple,
-        foregroundColor: Colors.white,
-        elevation: 0,
-      ),
-      body: _isLoading && _userData == null
-          ? const Center(child: CircularProgressIndicator(color: Colors.deepPurple))
-          : RefreshIndicator(
-              onRefresh: _fetchProfile,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: Column(
-                  children: [
-                    // Top Profile Summary Header
-                    _buildProfileHeader(),
-                    const SizedBox(height: 16),
+    return Obx(() {
+      final lang = _currentLangCode;
+      final isRtl = lang == 'ar';
+      final langName = _resolveLanguageName(lang);
 
-                    // SECTION 1: প্রোফাইল ও ব্যক্তিগত তথ্য (1 to 6)
-                    _buildSectionHeader('প্রোফাইল ও ব্যক্তিগত তথ্য (Profile & Personal Details)'),
-                    _buildMenuSection([
-                      // 1. My Profile
-                      _buildMenuItem(
-                        Icons.person,
-                        '1. My Profile (আমার প্রোফাইল)',
-                        'পূর্ণাঙ্গ প্রোফাইল ও সদস্য তথ্য দেখুন',
-                        () => _navigateTo(const ProfileScreen()),
-                      ),
-                      // 2. Edit Profile
-                      _buildMenuItem(
-                        Icons.edit,
-                        '2. Edit Profile (প্রোফাইল সম্পাদনা)',
-                        'নাম ও বর্তমান ঠিকানা পরিবর্তন',
-                        () async {
-                          if (_userData != null) {
-                            final updated = await Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (_) => EditProfileScreen(userData: _userData!)),
-                            );
-                            if (updated == true) _fetchProfile();
-                          } else {
-                            _navigateTo(const ProfileScreen());
-                          }
-                        },
-                      ),
-                      // 3. Profile Photo
-                      _buildMenuItem(
-                        Icons.add_a_photo,
-                        '3. Profile Photo (প্রোফাইল ছবি)',
-                        'ক্যামেরা বা গ্যালারি থেকে নতুন ছবি আপলোড',
-                        _showProfilePhotoModal,
-                      ),
-                      // 4. Phone Number
-                      _buildMenuItem(
-                        Icons.phone,
-                        '4. Phone Number (ফোন নম্বর)',
-                        _userPhone.isNotEmpty ? _userPhone : 'ফোন নম্বর পরিবর্তন বা যোগ করুন',
-                        () => _showQuickEditModal(
-                          title: 'ফোন নম্বর আপডেট',
-                          initialValue: _userPhone,
-                          label: 'নতুন ফোন নম্বর',
-                          keyboardType: TextInputType.phone,
-                          onSave: (val) => AuthService.updatePhoneNumber(val),
-                        ),
-                      ),
-                      // 5. Email Address
-                      _buildMenuItem(
-                        Icons.email,
-                        '5. Email Address (ইমেইল ঠিকানা)',
-                        _userEmail.isNotEmpty ? _userEmail : 'ইমেইল পরিবর্তন বা যোগ করুন',
-                        () => _showQuickEditModal(
-                          title: 'ইমেইল ঠিকানা আপডেট',
-                          initialValue: _userEmail,
-                          label: 'নতুন ইমেইল ঠিকানা',
-                          keyboardType: TextInputType.emailAddress,
-                          onSave: (val) => AuthService.updateEmailAddress(val),
-                        ),
-                      ),
-                      // 6. Change Password
-                      _buildMenuItem(
-                        Icons.lock_reset,
-                        '6. Change Password (পাসওয়ার্ড পরিবর্তন)',
-                        'নিরাপদ ৮-অক্ষরের নতুন পাসওয়ার্ড সেট করুন',
-                        () => _navigateTo(const ChangePasswordScreen()),
-                      ),
-                    ]),
-                    const SizedBox(height: 16),
+      return Directionality(
+        textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+        child: Scaffold(
+          backgroundColor: Colors.grey.shade100,
+          appBar: AppBar(
+            title: Text(_t('app_bar_title'), style: const TextStyle(fontWeight: FontWeight.bold)),
+            backgroundColor: Colors.deepPurple,
+            foregroundColor: Colors.white,
+            elevation: 0,
+          ),
+          body: _isLoading && _userData == null
+              ? const Center(child: CircularProgressIndicator(color: Colors.deepPurple))
+              : RefreshIndicator(
+                  onRefresh: _fetchProfile,
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: Column(
+                      children: [
+                        // Top Profile Summary Header
+                        _buildProfileHeader(lang),
+                        const SizedBox(height: 16),
 
-                    // SECTION 2: ওয়ালেট ও ভ্রমণ (7 to 10)
-                    _buildSectionHeader('ওয়ালেট ও ভ্রমণ (Finances & Trips)'),
-                    _buildMenuSection([
-                      // 7. Wallet
-                      _buildMenuItem(
-                        Icons.account_balance_wallet,
-                        '7. Wallet (স্বাধীন ওয়ালেট)',
-                        'ব্যালেন্স: ৳${_walletBalance.toStringAsFixed(2)} • Add Money & হিস্ট্রি',
-                        () => _navigateTo(const WalletScreen()),
-                        iconColor: Colors.deepPurple,
-                      ),
-                      // 8. Payment Methods
-                      _buildMenuItem(
-                        Icons.payment,
-                        '8. Payment Methods (পেমেন্ট পদ্ধতি)',
-                        'বিকাশ, নগদ, কার্ড, ওয়ালেট ও ক্যাশ ম্যানেজ করুন',
-                        () => _navigateTo(const PaymentMethodsScreen()),
-                        iconColor: Colors.indigo,
-                      ),
-                      // 9. Ride History
-                      _buildMenuItem(
-                        Icons.history,
-                        '9. Ride History (যাত্রার ইতিহাস)',
-                        'সম্পন্ন, বাতিল ও আগত সকল রাইড এবং ইনভয়েস',
-                        () => _navigateTo(const ActivityScreen()),
-                      ),
-                      // 10. Saved Places
-                      _buildMenuItem(
-                        Icons.bookmark,
-                        '10. Saved Places (সেভ করা স্থান)',
-                        'বাসা (Home), অফিস (Work) ও প্রিয় স্থানসমূহ',
-                        () => _navigateTo(const SavedPlacesScreen()),
-                      ),
-                    ]),
-                    const SizedBox(height: 16),
+                        // SECTION 1: Profile & Personal Details (1 to 6)
+                        _buildSectionHeader(_t('sec_profile')),
+                        _buildMenuSection([
+                          // 1. My Profile
+                          _buildMenuItem(
+                            Icons.person,
+                            _t('item1_title'),
+                            _t('item1_sub'),
+                            () => _navigateTo(const ProfileScreen()),
+                            isRtl: isRtl,
+                          ),
+                          // 2. Edit Profile
+                          _buildMenuItem(
+                            Icons.edit,
+                            _t('item2_title'),
+                            _t('item2_sub'),
+                            () async {
+                              if (_userData != null) {
+                                final updated = await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => EditProfileScreen(userData: _userData!)),
+                                );
+                                if (updated == true) _fetchProfile();
+                              } else {
+                                _navigateTo(const ProfileScreen());
+                              }
+                            },
+                            isRtl: isRtl,
+                          ),
+                          // 3. Profile Photo
+                          _buildMenuItem(
+                            Icons.add_a_photo,
+                            _t('item3_title'),
+                            _t('item3_sub'),
+                            _showProfilePhotoModal,
+                            isRtl: isRtl,
+                          ),
+                          // 4. Phone Number
+                          _buildMenuItem(
+                            Icons.phone,
+                            _t('item4_title'),
+                            _userPhone.isNotEmpty ? _userPhone : _t('item4_sub_empty'),
+                            () => _showQuickEditModal(
+                              title: _t('phone_modal_title'),
+                              initialValue: _userPhone,
+                              label: _t('phone_label'),
+                              keyboardType: TextInputType.phone,
+                              onSave: (val) => AuthService.updatePhoneNumber(val),
+                            ),
+                            isRtl: isRtl,
+                          ),
+                          // 5. Email Address
+                          _buildMenuItem(
+                            Icons.email,
+                            _t('item5_title'),
+                            _userEmail.isNotEmpty ? _userEmail : _t('item5_sub_empty'),
+                            () => _showQuickEditModal(
+                              title: _t('email_modal_title'),
+                              initialValue: _userEmail,
+                              label: _t('email_label'),
+                              keyboardType: TextInputType.emailAddress,
+                              onSave: (val) => AuthService.updateEmailAddress(val),
+                            ),
+                            isRtl: isRtl,
+                          ),
+                          // 6. Change Password
+                          _buildMenuItem(
+                            Icons.lock_reset,
+                            _t('item6_title'),
+                            _t('item6_sub'),
+                            () => _navigateTo(const ChangePasswordScreen()),
+                            isRtl: isRtl,
+                          ),
+                        ]),
+                        const SizedBox(height: 16),
 
-                    // SECTION 3: প্রেফারেন্সেস ও নিরাপত্তা (11 to 14)
-                    _buildSectionHeader('প্রেফারেন্সেস ও নিরাপত্তা (Preferences & Security)'),
-                    _buildMenuSection([
-                      // 11. Notifications
-                      _buildMenuItem(
-                        Icons.notifications,
-                        '11. Notifications (বিজ্ঞপ্তি ও নোটিফিকেশন)',
-                        'রাইড অ্যালার্ট, অফার ও ট্রিপ মেসেজ',
-                        () => _navigateTo(const NotificationsScreen()),
-                      ),
-                      // 12. Language Settings
-                      _buildMenuItem(
-                        Icons.language,
-                        '12. Language Settings (১২টি ভাষা পরিবর্তন)',
-                        'বর্তমান ভাষা: $_activeLanguageName',
-                        () async {
-                          final updated = await Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const LanguageSettingsScreen()),
-                          );
-                          if (updated == true) _fetchProfile();
-                        },
-                        iconColor: Colors.teal,
-                      ),
-                      // 13. Privacy Settings
-                      _buildMenuItem(
-                        Icons.privacy_tip,
-                        '13. Privacy Settings (গোপনীয়তা সেটিংস)',
-                        'প্রোফাইল ভিজিবিলিটি, ট্র্যাকিং ও ডেটা শেয়ারিং',
-                        () => _navigateTo(const PrivacySecurityScreen()),
-                      ),
-                      // 14. Safety Settings
-                      _buildMenuItem(
-                        Icons.shield,
-                        '14. Safety Settings (যাত্রী নিরাপত্তা হাব)',
-                        'SOS ইমার্জেন্সি, জরুরি ৯৯৯ ও পরিবারের নম্বর',
-                        () => _navigateTo(const SafetyScreen()),
-                        iconColor: Colors.red.shade700,
-                      ),
-                    ]),
-                    const SizedBox(height: 16),
+                        // SECTION 2: Finances & Trips (7 to 10)
+                        _buildSectionHeader(_t('sec_finances')),
+                        _buildMenuSection([
+                          // 7. Wallet
+                          _buildMenuItem(
+                            Icons.account_balance_wallet,
+                            _t('item7_title'),
+                            '${_t('item7_sub_prefix')}${_walletBalance.toStringAsFixed(2)}${_t('item7_sub_suffix')}',
+                            () => _navigateTo(const WalletScreen()),
+                            iconColor: Colors.deepPurple,
+                            isRtl: isRtl,
+                          ),
+                          // 8. Payment Methods
+                          _buildMenuItem(
+                            Icons.payment,
+                            _t('item8_title'),
+                            _t('item8_sub'),
+                            () => _navigateTo(const PaymentMethodsScreen()),
+                            iconColor: Colors.indigo,
+                            isRtl: isRtl,
+                          ),
+                          // 9. Ride History
+                          _buildMenuItem(
+                            Icons.history,
+                            _t('item9_title'),
+                            _t('item9_sub'),
+                            () => _navigateTo(const ActivityScreen()),
+                            isRtl: isRtl,
+                          ),
+                          // 10. Saved Places
+                          _buildMenuItem(
+                            Icons.bookmark,
+                            _t('item10_title'),
+                            _t('item10_sub'),
+                            () => _navigateTo(const SavedPlacesScreen()),
+                            isRtl: isRtl,
+                          ),
+                        ]),
+                        const SizedBox(height: 16),
 
-                    // SECTION 4: সাপোর্ট ও আইনি তথ্য (15 to 18)
-                    _buildSectionHeader('সাপোর্ট ও আইনি তথ্য (Support & Legal)'),
-                    _buildMenuSection([
-                      // 15. Help & Support
-                      _buildMenuItem(
-                        Icons.headset_mic,
-                        '15. Help & Support (সাহায্য ও সাপোর্ট)',
-                        '২৪/৭ হেল্পলাইন, এফএকিউ (FAQ) ও টিকেট সাবমিট',
-                        () => _navigateTo(const SupportScreen()),
-                      ),
-                      // 16. About Us
-                      _buildMenuItem(
-                        Icons.info_outline,
-                        '16. About Us (আমাদের সম্পর্কে)',
-                        'স্বাধীন যাত্রা প্ল্যাটফর্ম পরিচিতি ও ভার্সন',
-                        () => _navigateTo(const AboutScreen()),
-                      ),
-                      // 17. Terms & Conditions
-                      _buildMenuItem(
-                        Icons.rule,
-                        '17. Terms & Conditions (ব্যবহারের শর্তাবলী)',
-                        'প্ল্যাটফর্ম ব্যবহারের নিয়ম ও সেবার শর্তসমূহ',
-                        () => _navigateTo(const TermsConditionsScreen()),
-                      ),
-                      // 18. Privacy Policy
-                      _buildMenuItem(
-                        Icons.security,
-                        '18. Privacy Policy (প্রাইভেসি পলিসি)',
-                        'ডেটা সুরক্ষা ও ব্যক্তিগত তথ্যের নিরাপত্তা নীতি',
-                        () => _navigateTo(const PrivacyPolicyScreen()),
-                      ),
-                    ]),
-                    const SizedBox(height: 16),
+                        // SECTION 3: Preferences & Security (11 to 14)
+                        _buildSectionHeader(_t('sec_preferences')),
+                        _buildMenuSection([
+                          // 11. Notifications
+                          _buildMenuItem(
+                            Icons.notifications,
+                            _t('item11_title'),
+                            _t('item11_sub'),
+                            () => _navigateTo(const NotificationsScreen()),
+                            isRtl: isRtl,
+                          ),
+                          // 12. Language Settings
+                          _buildMenuItem(
+                            Icons.language,
+                            _t('item12_title'),
+                            '${_t('item12_sub_prefix')}$langName',
+                            () async {
+                              final updated = await Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const LanguageSettingsScreen()),
+                              );
+                              if (updated == true) {
+                                _fetchProfile();
+                                setState(() {});
+                              }
+                            },
+                            iconColor: Colors.teal,
+                            isRtl: isRtl,
+                          ),
+                          // 13. Privacy Settings
+                          _buildMenuItem(
+                            Icons.privacy_tip,
+                            _t('item13_title'),
+                            _t('item13_sub'),
+                            () => _navigateTo(const PrivacySecurityScreen()),
+                            isRtl: isRtl,
+                          ),
+                          // 14. Safety Settings
+                          _buildMenuItem(
+                            Icons.shield,
+                            _t('item14_title'),
+                            _t('item14_sub'),
+                            () => _navigateTo(const SafetyScreen()),
+                            iconColor: Colors.red.shade700,
+                            isRtl: isRtl,
+                          ),
+                        ]),
+                        const SizedBox(height: 16),
 
-                    // SECTION 5: অ্যাকাউন্ট অ্যাকশন (19 & 20)
-                    _buildSectionHeader('অ্যাকাউন্ট অ্যাকশন (Account Actions)'),
-                    _buildMenuSection([
-                      // 19. Logout
-                      _buildMenuItem(
-                        Icons.logout,
-                        '19. Logout (লগআউট)',
-                        'বর্তমান সেশন থেকে নিরাপদ প্রস্থান',
-                        _logout,
-                        isDestructive: true,
-                      ),
-                      // 20. Delete Account
-                      _buildMenuItem(
-                        Icons.delete_forever,
-                        '20. Delete Account (অ্যাকাউন্ট ডিলিট)',
-                        'স্থায়ীভাবে অ্যাকাউন্ট ও সকল ডেটা মুছে ফেলুন',
-                        _deleteAccount,
-                        isDestructive: true,
-                      ),
-                    ]),
-                    const SizedBox(height: 40),
-                  ],
+                        // SECTION 4: Support & Legal (15 to 18)
+                        _buildSectionHeader(_t('sec_support')),
+                        _buildMenuSection([
+                          // 15. Help & Support
+                          _buildMenuItem(
+                            Icons.headset_mic,
+                            _t('item15_title'),
+                            _t('item15_sub'),
+                            () => _navigateTo(const SupportScreen()),
+                            isRtl: isRtl,
+                          ),
+                          // 16. About Us
+                          _buildMenuItem(
+                            Icons.info_outline,
+                            _t('item16_title'),
+                            _t('item16_sub'),
+                            () => _navigateTo(const AboutScreen()),
+                            isRtl: isRtl,
+                          ),
+                          // 17. Terms & Conditions
+                          _buildMenuItem(
+                            Icons.rule,
+                            _t('item17_title'),
+                            _t('item17_sub'),
+                            () => _navigateTo(const TermsConditionsScreen()),
+                            isRtl: isRtl,
+                          ),
+                          // 18. Privacy Policy
+                          _buildMenuItem(
+                            Icons.security,
+                            _t('item18_title'),
+                            _t('item18_sub'),
+                            () => _navigateTo(const PrivacyPolicyScreen()),
+                            isRtl: isRtl,
+                          ),
+                        ]),
+                        const SizedBox(height: 16),
+
+                        // SECTION 5: Account Actions (19 & 20)
+                        _buildSectionHeader(_t('sec_actions')),
+                        _buildMenuSection([
+                          // 19. Logout
+                          _buildMenuItem(
+                            Icons.logout,
+                            _t('item19_title'),
+                            _t('item19_sub'),
+                            _logout,
+                            isDestructive: true,
+                            isRtl: isRtl,
+                          ),
+                          // 20. Delete Account
+                          _buildMenuItem(
+                            Icons.delete_forever,
+                            _t('item20_title'),
+                            _t('item20_sub'),
+                            _deleteAccount,
+                            isDestructive: true,
+                            isRtl: isRtl,
+                          ),
+                        ]),
+                        const SizedBox(height: 40),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
-    );
+        ),
+      );
+    });
   }
 
   Widget _buildSectionHeader(String title) {
@@ -613,7 +664,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
     );
   }
 
-  Widget _buildProfileHeader() {
+  Widget _buildProfileHeader(String lang) {
     return GestureDetector(
       onTap: () => _navigateTo(const ProfileScreen()),
       child: Container(
@@ -678,7 +729,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
                           children: [
                             const Icon(Icons.star, size: 14, color: Colors.amber),
                             const SizedBox(width: 4),
-                            Text('$_rating রেটিং', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            Text('$_rating ${_t('rating_suffix')}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                           ],
                         ),
                       ),
@@ -691,7 +742,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
                           border: Border.all(color: Colors.deepPurple.shade200),
                         ),
                         child: Text(
-                          '৳ ${_walletBalance.toStringAsFixed(0)} ওয়ালেট',
+                          '৳ ${_walletBalance.toStringAsFixed(0)} ${_t('wallet_suffix')}',
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.deepPurple),
                         ),
                       ),
@@ -700,7 +751,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.grey),
+            Icon(lang == 'ar' ? Icons.chevron_left : Icons.chevron_right, color: Colors.grey),
           ],
         ),
       ),
@@ -730,6 +781,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
     VoidCallback onTap, {
     bool isDestructive = false,
     Color? iconColor,
+    bool isRtl = false,
   }) {
     final itemColor = isDestructive ? Colors.red : Colors.black87;
     final primaryIconColor = isDestructive ? Colors.red : (iconColor ?? Colors.deepPurple);
@@ -751,7 +803,7 @@ class _AccountDashboardState extends State<AccountDashboard> {
         subtitle,
         style: TextStyle(color: isDestructive ? Colors.red.shade300 : Colors.grey.shade600, fontSize: 12),
       ),
-      trailing: const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
+      trailing: Icon(isRtl ? Icons.chevron_left : Icons.chevron_right, color: Colors.grey, size: 20),
       onTap: onTap,
     );
   }

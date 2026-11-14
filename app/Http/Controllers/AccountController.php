@@ -53,7 +53,7 @@ class AccountController extends Controller
                 'avatar' => $user->avatar ? asset('storage/' . $user->avatar) : null,
                 'wallet_balance' => (float) ($user->wallet_balance ?? 0.00),
                 'default_payment_method' => $user->default_payment_method ?? 'cash',
-                'language' => $user->language ?? 'bn',
+                'language' => $user->language ?? 'en',
                 'theme' => $user->theme ?? 'system',
                 'map_style' => $user->map_style ?? 'standard',
                 'traffic_view' => (bool) $user->traffic_view,
@@ -548,109 +548,318 @@ class AccountController extends Controller
     public function seedSampleNotifications(Request $request): JsonResponse
     {
         $user = $request->user();
+        $lang = $user->language ?? 'en';
 
-        $samples = [
-            [
-                'title' => 'Booking Confirmed • রাইড বুকিং নিশ্চিত হয়েছে',
-                'message' => 'আপনার রাইড রিকোয়েস্ট সফলভাবে কনফার্ম হয়েছে। কাছাকাছি সক্রিয় চালকদের কাছে অনুরোধ পাঠানো হয়েছে।',
-                'type' => 'ride_confirmed',
-                'data' => [
-                    'ride_code' => '#SJ-2041',
-                    'pickup' => 'ধানমন্ডি ২৭, ঢাকা',
-                    'dropoff' => 'গুলশান ২, ঢাকা',
-                    'vehicle_type' => 'Car Sedan',
-                    'estimated_fare' => 280.00,
+        if ($lang === 'en') {
+            $samples = [
+                [
+                    'title' => 'Booking Confirmed',
+                    'message' => 'Your ride request has been confirmed. Searching for nearby available drivers.',
+                    'type' => 'ride_confirmed',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'pickup' => 'Dhanmondi 27, Dhaka',
+                        'dropoff' => 'Gulshan 2, Dhaka',
+                        'vehicle_type' => 'Car Sedan',
+                        'estimated_fare' => 280.00,
+                    ],
                 ],
-            ],
-            [
-                'title' => 'Driver Accepted • চালক রাইড গ্রহণ করেছেন',
-                'message' => 'চালক আরিফুল ইসলাম আপনার রাইড গ্রহণ করেছেন এবং আপনার পিকআপ পয়েন্টের উদ্দেশ্যে রওনা দিয়েছেন।',
-                'type' => 'driver_accepted',
-                'data' => [
-                    'ride_code' => '#SJ-2041',
-                    'driver_name' => 'আরিফুল ইসলাম',
-                    'driver_phone' => '01712345678',
-                    'vehicle_model' => 'Toyota Allion',
-                    'vehicle_plate' => 'ঢাকা মেট্রো-গ ১২-৩৪৫৬',
-                    'eta_minutes' => 4,
+                [
+                    'title' => 'Driver Accepted',
+                    'message' => 'Driver Ariful Islam has accepted your ride and is en route to pickup location.',
+                    'type' => 'driver_accepted',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'driver_name' => 'Ariful Islam',
+                        'driver_phone' => '01712345678',
+                        'vehicle_model' => 'Toyota Allion',
+                        'vehicle_plate' => 'Dhaka Metro-Ga 12-3456',
+                        'eta_minutes' => 4,
+                    ],
                 ],
-            ],
-            [
-                'title' => 'Driver Arrived • চালক পৌঁছে গেছেন',
-                'message' => 'আপনার চালক পিকআপ পয়েন্টে (ধানমন্ডি ২৭) পৌঁছে অপেক্ষা করছেন। বিনামূল্যে অপেক্ষার সময় ৫ মিনিট।',
-                'type' => 'driver_arrived',
-                'data' => [
-                    'ride_code' => '#SJ-2041',
-                    'driver_name' => 'আরিফুল ইসলাম',
-                    'waiting_time' => '5 মিনিট',
+                [
+                    'title' => 'Driver Arrived',
+                    'message' => 'Your driver has arrived at the pickup location. Free waiting time is 5 minutes.',
+                    'type' => 'driver_arrived',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'driver_name' => 'Ariful Islam',
+                        'waiting_time' => '5 minutes',
+                    ],
                 ],
-            ],
-            [
-                'title' => 'Trip Started • যাত্রা শুরু হয়েছে',
-                'message' => 'ওটিপি (OTP) সফলভাবে যাচাই করা হয়েছে। আপনার যাত্রা শুরু হয়েছে, নিরাপদ ও স্বাচ্ছন্দ্যময় ভ্রমণ কামনা করছি!',
-                'type' => 'trip_started',
-                'data' => [
-                    'ride_code' => '#SJ-2041',
-                    'destination' => 'গুলশান ২, ঢাকা',
-                    'started_at' => now()->format('h:i A'),
+                [
+                    'title' => 'Trip Started',
+                    'message' => 'OTP verified successfully. Your journey has begun, wish you a safe and pleasant ride!',
+                    'type' => 'trip_started',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'destination' => 'Gulshan 2, Dhaka',
+                        'started_at' => now()->format('h:i A'),
+                    ],
                 ],
-            ],
-            [
-                'title' => 'Trip Completed • আপনি গন্তব্যে পৌঁছে গেছেন',
-                'message' => 'আপনার ট্রিপ সফলভাবে সম্পন্ন হয়েছে। মোট দূরত্ব: ৮.৫ কিমি, মোট সময়: ২৬ মিনিট, চূড়ান্ত ভাড়া: ৳২৮০।',
-                'type' => 'trip_completed',
-                'data' => [
-                    'ride_code' => '#SJ-2041',
-                    'distance' => '8.5 কিমি',
-                    'duration' => '26 মিনিট',
-                    'total_fare' => 280.00,
-                    'status' => 'completed',
+                [
+                    'title' => 'Trip Completed',
+                    'message' => 'Your trip has been completed successfully. Distance: 8.5 km, Duration: 26 mins, Final Fare: ৳280.',
+                    'type' => 'trip_completed',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'distance' => '8.5 km',
+                        'duration' => '26 mins',
+                        'total_fare' => 280.00,
+                        'status' => 'completed',
+                    ],
                 ],
-            ],
-            [
-                'title' => 'Payment Successful • ভাড়া পরিশোধ সফল হয়েছে',
-                'message' => '৳২৮০ টাকা স্বাধীন ওয়ালেট থেকে সফলভাবে পরিশোধ করা হয়েছে। লেনদেন আইডি: TXN-WLT-9921।',
-                'type' => 'payment_successful',
-                'data' => [
-                    'ride_code' => '#SJ-2041',
-                    'fare_amount' => 280.00,
-                    'payment_method' => 'wallet',
-                    'transaction_id' => 'TXN-WLT-9921',
-                    'paid_at' => now()->format('d M Y, h:i A'),
+                [
+                    'title' => 'Payment Successful',
+                    'message' => '৳280.00 paid successfully using Shadhin Wallet. Transaction ID: TXN-WLT-9921.',
+                    'type' => 'payment_successful',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'fare_amount' => 280.00,
+                        'payment_method' => 'wallet',
+                        'transaction_id' => 'TXN-WLT-9921',
+                        'paid_at' => now()->format('d M Y, h:i A'),
+                    ],
                 ],
-            ],
-            [
-                'title' => 'Ride Cancelled • রাইড বাতিল করা হয়েছে',
-                'message' => 'আপনার রাইড #SJ-1980 সফলভাবে বাতিল করা হয়েছে। কারণ: ভুল পিকআপ লোকেশন নির্বাচন।',
-                'type' => 'ride_cancelled',
-                'data' => [
-                    'ride_code' => '#SJ-1980',
-                    'reason' => 'ভুল পিকআপ লোকেশন নির্বাচন',
-                    'cancellation_fee' => 0.00,
+                [
+                    'title' => 'Ride Cancelled',
+                    'message' => 'Ride #SJ-1980 was cancelled successfully. Cancellation fee: ৳0.00.',
+                    'type' => 'ride_cancelled',
+                    'data' => [
+                        'ride_code' => '#SJ-1980',
+                        'reason' => 'Changed pickup location',
+                        'cancellation_fee' => 0.00,
+                    ],
                 ],
-            ],
-            [
-                'title' => 'Refund Update • রিফান্ড অ্যাকাউন্টে জমা হয়েছে',
-                'message' => 'বাতিলকৃত ট্রিপের রিফান্ড বাবদ ৳১২০.০০ টাকা আপনার স্বাধীন ওয়ালেটে ফেরত জমা হয়েছে। বর্তমান ওয়ালেট ব্যালেন্স: ৳৭৫০.০০।',
-                'type' => 'refund_update',
-                'data' => [
-                    'refund_amount' => 120.00,
-                    'ride_code' => '#SJ-1980',
-                    'wallet_balance' => 750.00,
-                    'transaction_code' => 'REF-WLT-5542',
+                [
+                    'title' => 'Refund Update',
+                    'message' => 'A refund of ৳120.00 has been credited to your Shadhin Wallet. Current Balance: ৳750.00.',
+                    'type' => 'refund_update',
+                    'data' => [
+                        'refund_amount' => 120.00,
+                        'ride_code' => '#SJ-1980',
+                        'wallet_balance' => 750.00,
+                        'transaction_code' => 'REF-WLT-5542',
+                    ],
                 ],
-            ],
-            [
-                'title' => 'Special Promo • ২৫% ছাড় প্রমোশন!',
-                'message' => 'স্বাধীন যাত্রার বিশেষ অফার! কুপন কোড SHADHIN25 ব্যবহার করে আপনার পরবর্তী ৩টি রাইডে উপভোগ করুন ২৫% পর্যন্ত ক্যাশব্যাক বা মূল্যছাড়!',
-                'type' => 'promotional',
-                'data' => [
-                    'promo_code' => 'SHADHIN25',
-                    'discount_percent' => 25,
-                    'valid_until' => now()->addDays(7)->format('d M Y'),
+                [
+                    'title' => 'Special Promo • 25% Off!',
+                    'message' => 'Enjoy 25% off on your next 3 rides using coupon code SHADHIN25!',
+                    'type' => 'promotional',
+                    'data' => [
+                        'promo_code' => 'SHADHIN25',
+                        'discount_percent' => 25,
+                        'valid_until' => now()->addDays(7)->format('d M Y'),
+                    ],
                 ],
-            ],
-        ];
+            ];
+        } elseif ($lang === 'ar') {
+            $samples = [
+                [
+                    'title' => 'تم تأكيد الحجز',
+                    'message' => 'تم تأكيد طلب رحلتك بنجاح. يتم الآن إشعار السائقين القريبين.',
+                    'type' => 'ride_confirmed',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'pickup' => 'دانموندي 27، دكا',
+                        'dropoff' => 'جولشان 2، دكا',
+                        'vehicle_type' => 'Car Sedan',
+                        'estimated_fare' => 280.00,
+                    ],
+                ],
+                [
+                    'title' => 'تم قبول الرحلة',
+                    'message' => 'قبل السائق عارف الإسلام رحلتك وهو في طريقه إلى نقطة الانطلاق.',
+                    'type' => 'driver_accepted',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'driver_name' => 'Ariful Islam',
+                        'driver_phone' => '01712345678',
+                        'vehicle_model' => 'Toyota Allion',
+                        'vehicle_plate' => 'DHK-12-3456',
+                        'eta_minutes' => 4,
+                    ],
+                ],
+                [
+                    'title' => 'وصل السائق',
+                    'message' => 'وصل سائقك إلى نقطة الانطلاق وهو في انتظارك.',
+                    'type' => 'driver_arrived',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'driver_name' => 'Ariful Islam',
+                        'waiting_time' => '5 دقائق',
+                    ],
+                ],
+                [
+                    'title' => 'بدأت الرحلة',
+                    'message' => 'تم التحقق من الرمز بنجاح. نتمنى لك رحلة آمنة ومريحة!',
+                    'type' => 'trip_started',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'destination' => 'جولشان 2، دكا',
+                        'started_at' => now()->format('h:i A'),
+                    ],
+                ],
+                [
+                    'title' => 'اكتملت الرحلة',
+                    'message' => 'اكتملت رحلتك بنجاح. المسافة: 8.5 كم، الأجرة: ৳280.',
+                    'type' => 'trip_completed',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'distance' => '8.5 km',
+                        'duration' => '26 mins',
+                        'total_fare' => 280.00,
+                        'status' => 'completed',
+                    ],
+                ],
+                [
+                    'title' => 'تم الدفع بنجاح',
+                    'message' => 'تم دفع ৳280 بنجاح عبر محفظة شادهين. معرف المعاملة: TXN-WLT-9921.',
+                    'type' => 'payment_successful',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'fare_amount' => 280.00,
+                        'payment_method' => 'wallet',
+                        'transaction_id' => 'TXN-WLT-9921',
+                        'paid_at' => now()->format('d M Y, h:i A'),
+                    ],
+                ],
+                [
+                    'title' => 'تم إلغاء الرحلة',
+                    'message' => 'تم إلغاء رحلتك #SJ-1980 بنجاح.',
+                    'type' => 'ride_cancelled',
+                    'data' => [
+                        'ride_code' => '#SJ-1980',
+                        'reason' => 'Changed pickup location',
+                        'cancellation_fee' => 0.00,
+                    ],
+                ],
+                [
+                    'title' => 'تحديث الاسترداد',
+                    'message' => 'تمت إضافة مبلغ ৳120 إلى محفظتك بنجاح. الرصيد الحالي: ৳750.00.',
+                    'type' => 'refund_update',
+                    'data' => [
+                        'refund_amount' => 120.00,
+                        'ride_code' => '#SJ-1980',
+                        'wallet_balance' => 750.00,
+                        'transaction_code' => 'REF-WLT-5542',
+                    ],
+                ],
+                [
+                    'title' => 'عرض ترويجي خاص • خصم 25%!',
+                    'message' => 'استخدم الرمز SHADHIN25 للحصول على خصم 25% على رحلاتك الثلاث القادمة!',
+                    'type' => 'promotional',
+                    'data' => [
+                        'promo_code' => 'SHADHIN25',
+                        'discount_percent' => 25,
+                        'valid_until' => now()->addDays(7)->format('d M Y'),
+                    ],
+                ],
+            ];
+        } else {
+            $samples = [
+                [
+                    'title' => 'রাইড বুকিং নিশ্চিত হয়েছে',
+                    'message' => 'আপনার রাইড রিকোয়েস্ট সফলভাবে কনফার্ম হয়েছে। কাছাকাছি সক্রিয় চালকদের কাছে অনুরোধ পাঠানো হয়েছে।',
+                    'type' => 'ride_confirmed',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'pickup' => 'ধানমন্ডি ২৭, ঢাকা',
+                        'dropoff' => 'গুলশান ২, ঢাকা',
+                        'vehicle_type' => 'Car Sedan',
+                        'estimated_fare' => 280.00,
+                    ],
+                ],
+                [
+                    'title' => 'চালক রাইড গ্রহণ করেছেন',
+                    'message' => 'চালক আরিফুল ইসলাম আপনার রাইড গ্রহণ করেছেন এবং আপনার পিকআপ পয়েন্টের উদ্দেশ্যে রওনা দিয়েছেন।',
+                    'type' => 'driver_accepted',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'driver_name' => 'আরিফুল ইসলাম',
+                        'driver_phone' => '01712345678',
+                        'vehicle_model' => 'Toyota Allion',
+                        'vehicle_plate' => 'ঢাকা মেট্রো-গ ১২-৩৪৫৬',
+                        'eta_minutes' => 4,
+                    ],
+                ],
+                [
+                    'title' => 'চালক পৌঁছে গেছেন',
+                    'message' => 'আপনার চালক পিকআপ পয়েন্টে (ধানমন্ডি ২৭) পৌঁছে অপেক্ষা করছেন। বিনামূল্যে অপেক্ষার সময় ৫ মিনিট।',
+                    'type' => 'driver_arrived',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'driver_name' => 'আরিফুল ইসলাম',
+                        'waiting_time' => '5 মিনিট',
+                    ],
+                ],
+                [
+                    'title' => 'যাত্রা শুরু হয়েছে',
+                    'message' => 'ওটিপি (OTP) সফলভাবে যাচাই করা হয়েছে। আপনার যাত্রা শুরু হয়েছে, নিরাপদ ও স্বাচ্ছন্দ্যময় ভ্রমণ কামনা করছি!',
+                    'type' => 'trip_started',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'destination' => 'গুলশান ২, ঢাকা',
+                        'started_at' => now()->format('h:i A'),
+                    ],
+                ],
+                [
+                    'title' => 'আপনি গন্তব্যে পৌঁছে গেছেন',
+                    'message' => 'আপনার ট্রিপ সফলভাবে সম্পন্ন হয়েছে। মোট দূরত্ব: ৮.৫ কিমি, মোট সময়: ২৬ মিনিট, চূড়ান্ত ভাড়া: ৳২৮০।',
+                    'type' => 'trip_completed',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'distance' => '8.5 কিমি',
+                        'duration' => '26 মিনিট',
+                        'total_fare' => 280.00,
+                        'status' => 'completed',
+                    ],
+                ],
+                [
+                    'title' => 'ভাড়া পরিশোধ সফল হয়েছে',
+                    'message' => '৳২৮০ টাকা স্বাধীন ওয়ালেট থেকে সফলভাবে পরিশোধ করা হয়েছে। লেনদেন আইডি: TXN-WLT-9921।',
+                    'type' => 'payment_successful',
+                    'data' => [
+                        'ride_code' => '#SJ-2041',
+                        'fare_amount' => 280.00,
+                        'payment_method' => 'wallet',
+                        'transaction_id' => 'TXN-WLT-9921',
+                        'paid_at' => now()->format('d M Y, h:i A'),
+                    ],
+                ],
+                [
+                    'title' => 'রাইড বাতিল করা হয়েছে',
+                    'message' => 'আপনার রাইড #SJ-1980 সফলভাবে বাতিল করা হয়েছে। কারণ: ভুল পিকআপ লোকেশন নির্বাচন।',
+                    'type' => 'ride_cancelled',
+                    'data' => [
+                        'ride_code' => '#SJ-1980',
+                        'reason' => 'ভুল পিকআপ লোকেশন নির্বাচন',
+                        'cancellation_fee' => 0.00,
+                    ],
+                ],
+                [
+                    'title' => 'রিফান্ড অ্যাকাউন্টে জমা হয়েছে',
+                    'message' => 'বাতিলকৃত ট্রিপের রিফান্ড বাবদ ৳১২০.০০ টাকা আপনার স্বাধীন ওয়ালেটে ফেরত জমা হয়েছে। বর্তমান ওয়ালেট ব্যালেন্স: ৳৭৫০.০০।',
+                    'type' => 'refund_update',
+                    'data' => [
+                        'refund_amount' => 120.00,
+                        'ride_code' => '#SJ-1980',
+                        'wallet_balance' => 750.00,
+                        'transaction_code' => 'REF-WLT-5542',
+                    ],
+                ],
+                [
+                    'title' => 'বিশেষ অফার • ২৫% ছাড় প্রমোশন!',
+                    'message' => 'স্বাধীন যাত্রার বিশেষ অফার! কুপন কোড SHADHIN25 ব্যবহার করে আপনার পরবর্তী ৩টি রাইডে উপভোগ করুন ২৫% পর্যন্ত ক্যাশব্যাক বা মূল্যছাড়!',
+                    'type' => 'promotional',
+                    'data' => [
+                        'promo_code' => 'SHADHIN25',
+                        'discount_percent' => 25,
+                        'valid_until' => now()->addDays(7)->format('d M Y'),
+                    ],
+                ],
+            ];
+        }
 
         $created = [];
         foreach ($samples as $sample) {
@@ -904,14 +1113,14 @@ class AccountController extends Controller
     public function languages(Request $request): JsonResponse
     {
         $user = $request->user();
-        $currentCode = $user ? ($user->language ?? 'bn') : 'bn';
+        $currentCode = $user ? ($user->language ?? 'en') : 'en';
 
         $languagesWithActive = array_map(function ($lang) use ($currentCode) {
             $lang['is_active'] = ($lang['code'] === $currentCode);
             return $lang;
         }, self::SUPPORTED_LANGUAGES);
 
-        $currentLang = collect(self::SUPPORTED_LANGUAGES)->firstWhere('code', $currentCode) ?? self::SUPPORTED_LANGUAGES[0];
+        $currentLang = collect(self::SUPPORTED_LANGUAGES)->firstWhere('code', $currentCode) ?? collect(self::SUPPORTED_LANGUAGES)->firstWhere('code', 'en') ?? self::SUPPORTED_LANGUAGES[0];
 
         return response()->json([
             'success' => true,

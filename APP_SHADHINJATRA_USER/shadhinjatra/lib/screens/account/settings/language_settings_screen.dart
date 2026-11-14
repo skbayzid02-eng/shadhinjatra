@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shadhinjatra/controllers/language_controller.dart';
 import 'package:shadhinjatra/services/auth_service.dart';
 
 class LanguageSettingsScreen extends StatefulWidget {
@@ -11,7 +13,7 @@ class LanguageSettingsScreen extends StatefulWidget {
 
 class _LanguageSettingsScreenState extends State<LanguageSettingsScreen> {
   bool _isLoading = true;
-  String _activeCode = 'bn';
+  String _activeCode = 'en';
   String _searchQuery = '';
   List<Map<String, dynamic>> _languages = [
     {'code': 'bn', 'name': 'Bangla', 'native_name': 'বাংলা', 'flag': '🇧🇩', 'direction': 'ltr'},
@@ -38,7 +40,7 @@ class _LanguageSettingsScreenState extends State<LanguageSettingsScreen> {
     setState(() => _isLoading = true);
     try {
       final prefs = await SharedPreferences.getInstance();
-      final localLang = prefs.getString('language') ?? 'bn';
+      final localLang = prefs.getString('language') ?? prefs.getString('user_selected_language') ?? 'en';
       _activeCode = localLang;
 
       final res = await AuthService.fetchSupportedLanguages();
@@ -70,6 +72,16 @@ class _LanguageSettingsScreenState extends State<LanguageSettingsScreen> {
     // Save locally
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('language', code);
+    await prefs.setString('user_selected_language', code);
+
+    // Update app-wide controller & locale
+    try {
+      if (Get.isRegistered<LanguageController>()) {
+        await Get.find<LanguageController>().changeLanguage(code, context);
+      }
+    } catch (e) {
+      debugPrint('LanguageController switch error: $e');
+    }
 
     // Update in backend
     final res = await AuthService.updateAccountLanguage(code);
@@ -77,9 +89,15 @@ class _LanguageSettingsScreenState extends State<LanguageSettingsScreen> {
     if (!mounted) return;
 
     if (res['success'] == true) {
+      String successMsg = code == 'bn'
+          ? '$nativeName ভাষা সফলভাবে নির্বাচন করা হয়েছে!'
+          : (code == 'ar'
+              ? 'تم تغيير اللغة بنجاح إلى $nativeName!'
+              : 'Language successfully updated to $nativeName!');
+
       messenger.showSnackBar(
         SnackBar(
-          content: Text('$nativeName ভাষা সফলভাবে নির্বাচন করা হয়েছে!'),
+          content: Text(successMsg),
           backgroundColor: Colors.green.shade700,
         ),
       );
@@ -87,7 +105,7 @@ class _LanguageSettingsScreenState extends State<LanguageSettingsScreen> {
     } else {
       messenger.showSnackBar(
         SnackBar(
-          content: Text(res['message']?.toString() ?? 'ভাষা পরিবর্তন ব্যর্থ হয়েছে'),
+          content: Text(res['message']?.toString() ?? 'Failed to update language'),
           backgroundColor: Colors.red,
         ),
       );
