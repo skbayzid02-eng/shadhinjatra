@@ -103,8 +103,9 @@ class DriverBackgroundService with WidgetsBindingObserver {
     _isRunning = true;
     _alertedRideIds.clear();
 
-    // 2. Start Foreground Location Stream
-    await _startLocationStream();
+    // 2. Start Foreground Location Stream with active language
+    final lang = await AuthService.getLanguage();
+    await _startLocationStream(languageCode: lang);
 
     // 3. Start Periodic Background Heartbeat (every 12 seconds)
     _startHeartbeatTimer();
@@ -134,7 +135,7 @@ class DriverBackgroundService with WidgetsBindingObserver {
     _notifyListeners();
   }
 
-  /// Verify GPS and Location Permissions (Requirement 7)
+  /// Verify GPS and Location Permissions
   Future<bool> checkPermissionsAndGps() async {
     try {
       _isGpsEnabled = await Geolocator.isLocationServiceEnabled();
@@ -158,12 +159,17 @@ class DriverBackgroundService with WidgetsBindingObserver {
     }
   }
 
-  /// Start Geolocator position stream with Android Foreground Notification & WakeLock (Requirement 1 & 4)
-  Future<void> _startLocationStream() async {
+  /// Start Geolocator position stream with Android Foreground Notification & WakeLock
+  /// Dynamically pulls title & text for the currently selected language (12 supported languages)
+  Future<void> _startLocationStream({String? languageCode}) async {
     await _positionSubscription?.cancel();
 
     try {
-      // Android Settings configured for background survival
+      final lang = languageCode ?? await AuthService.getLanguage();
+      final title = _DriverNotificationStrings.get(lang, 'title');
+      final text = _DriverNotificationStrings.get(lang, 'text');
+
+      // Android Settings configured for background survival with localized notification
       LocationSettings locationSettings;
       if (defaultTargetPlatform == TargetPlatform.android) {
         locationSettings = AndroidSettings(
@@ -171,9 +177,9 @@ class DriverBackgroundService with WidgetsBindingObserver {
           distanceFilter: 5,
           forceLocationManager: true,
           intervalDuration: const Duration(seconds: 10),
-          foregroundNotificationConfig: const ForegroundNotificationConfig(
-            notificationTitle: 'স্বাধীনযাত্রা ড্রাইভার লাইভ ট্র্যাকিং',
-            notificationText: 'আপনি অনলাইনে আছেন - ব্যাকগ্রাউন্ড লোকেশন সক্রিয়',
+          foregroundNotificationConfig: ForegroundNotificationConfig(
+            notificationTitle: title,
+            notificationText: text,
             enableWakeLock: true,
           ),
         );
@@ -204,6 +210,18 @@ class DriverBackgroundService with WidgetsBindingObserver {
     }
   }
 
+  /// Dynamically update Foreground Notification title & text when driver changes language
+  Future<void> updateNotificationLanguage(String languageCode) async {
+    if (!_isRunning) return;
+    try {
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        await _startLocationStream(languageCode: languageCode);
+      }
+    } catch (e) {
+      debugPrint('Error updating notification language: $e');
+    }
+  }
+
   /// Setup Periodic Heartbeat
   void _startHeartbeatTimer() {
     _heartbeatTimer?.cancel();
@@ -214,7 +232,7 @@ class DriverBackgroundService with WidgetsBindingObserver {
     });
   }
 
-  /// Immediate Heartbeat Dispatcher (Requirement 2, 3, 5, 6)
+  /// Immediate Heartbeat Dispatcher
   Future<void> _sendHeartbeatImmediate() async {
     if (!_isRunning) return;
 
@@ -237,11 +255,11 @@ class DriverBackgroundService with WidgetsBindingObserver {
       );
 
       if (res['is_connection_error'] == true) {
-        _setConnectionStatus(true); // Internet Lost (Requirement 5)
+        _setConnectionStatus(true);
         return;
       }
 
-      _setConnectionStatus(false); // Internet OK
+      _setConnectionStatus(false);
 
       if (res['success'] == true) {
         final serverIsOnline = res['is_online'] == true;
@@ -250,7 +268,7 @@ class DriverBackgroundService with WidgetsBindingObserver {
           onOnlineStatusChanged?.call(false);
         }
 
-        // Check for new incoming ride alert (Requirement 2 & 3)
+        // Check for new incoming ride alert
         if (res['new_ride_alert'] != null) {
           final alert = Map<String, dynamic>.from(res['new_ride_alert']);
           final rideId = (alert['ride_id'] as num?)?.toInt() ?? 0;
@@ -277,7 +295,7 @@ class DriverBackgroundService with WidgetsBindingObserver {
     }
   }
 
-  /// Play audible alert and heavy vibration for new incoming ride request (Requirement 3)
+  /// Play audible alert and heavy vibration for new incoming ride request
   void _playRideAlertSoundAndVibration() {
     SystemSound.play(SystemSoundType.alert);
     HapticFeedback.heavyImpact();
@@ -303,3 +321,84 @@ class DriverBackgroundService with WidgetsBindingObserver {
   }
 }
 
+/// 12 Supported Languages Translations for Background Foreground Notification & Alerts
+class _DriverNotificationStrings {
+  static const Map<String, Map<String, String>> translations = {
+    'en': {
+      'title': 'Shadhin Jatra Driver Live Tracking',
+      'text': 'You are online - Background location active',
+      'conn_lost': 'Internet connection lost: Reconnecting...',
+      'new_ride_alert': 'New ride request available!',
+    },
+    'bn': {
+      'title': 'স্বাধীনযাত্রা ড্রাইভার লাইভ ট্র্যাকিং',
+      'text': 'আপনি অনলাইনে আছেন - ব্যাকগ্রাউন্ড লোকেশন সক্রিয়',
+      'conn_lost': 'ইন্টারনেট সংযোগ বিচ্ছিন্ন: পুনরায় সংযোগ করা হচ্ছে...',
+      'new_ride_alert': 'নতুন রাইডের অনুরোধ এসেছে!',
+    },
+    'ar': {
+      'title': 'تتبع مباشر لسائق شادهين جاترا',
+      'text': 'أنت متصل بالإنترنت - تتبع الموقع في الخلفية نشط',
+      'conn_lost': 'انقطع الاتصال بالإنترنت: جارٍ إعادة الاتصال...',
+      'new_ride_alert': 'طلب مشوار جديد متاح!',
+    },
+    'hi': {
+      'title': 'स्वाधीन यात्रा ड्राइवर लाइव ट्रैकिंग',
+      'text': 'आप ऑनलाइन हैं - बैकग्राउंड लोकेशन सक्रिय है',
+      'conn_lost': 'इंटरनेट कनेक्शन कट गया: पुनः कनेक्ट हो रहा है...',
+      'new_ride_alert': 'नई राइड का अनुरोध आया है!',
+    },
+    'es': {
+      'title': 'Seguimiento en Vivo Conductor Shadhin Jatra',
+      'text': 'Estás en línea - Ubicación en segundo plano activa',
+      'conn_lost': 'Conexión a internet perdida: Reconectando...',
+      'new_ride_alert': '¡Nueva solicitud de viaje disponible!',
+    },
+    'fr': {
+      'title': 'Suivi en Direct Chauffeur Shadhin Jatra',
+      'text': 'Vous êtes en ligne - Localisation en arrière-plan active',
+      'conn_lost': 'Connexion Internet perdue: Reconnexion en cours...',
+      'new_ride_alert': 'Nouvelle demande de course disponible !',
+    },
+    'zh': {
+      'title': 'Shadhin Jatra 司机实时追踪',
+      'text': '您已上线 - 后台定位已启用',
+      'conn_lost': '网络连接断开：正在重新连接...',
+      'new_ride_alert': '有新的行程请求！',
+    },
+    'pt': {
+      'title': 'Rastreamento ao Vivo Motorista Shadhin Jatra',
+      'text': 'Você está online - Localização em segundo plano ativa',
+      'conn_lost': 'Conexão de internet perdida: Reconectando...',
+      'new_ride_alert': 'Novo pedido de corrida disponível!',
+    },
+    'ru': {
+      'title': 'Прямое отслеживание водителя Shadhin Jatra',
+      'text': 'Вы в сети - Фоновая геолокация активна',
+      'conn_lost': 'Потеряно подключение к Интернету: Повторное подключение...',
+      'new_ride_alert': 'Доступен новый заказ поездки!',
+    },
+    'id': {
+      'title': 'Pelacakan Langsung Pengemudi Shadhin Jatra',
+      'text': 'Anda online - Lokasi latar belakang aktif',
+      'conn_lost': 'Koneksi internet terputus: Menyambung ulang...',
+      'new_ride_alert': 'Permintaan perjalanan baru tersedia!',
+    },
+    'tr': {
+      'title': 'Shadhin Jatra Sürücü Canlı Takip',
+      'text': 'Çevrimiçisiniz - Arka plan konumu aktif',
+      'conn_lost': 'İnternet bağlantısı kesildi: Yeniden bağlanıyor...',
+      'new_ride_alert': 'Yeni yolculuk talebi mevcut!',
+    },
+    'de': {
+      'title': 'Shadhin Jatra Fahrer Live-Tracking',
+      'text': 'Sie sind online - Hintergrund-Standort aktiv',
+      'conn_lost': 'Internetverbindung verloren: Wiederverbindung...',
+      'new_ride_alert': 'Neue Fahrtanfrage verfügbar!',
+    },
+  };
+
+  static String get(String langCode, String key) {
+    return translations[langCode]?[key] ?? translations['en']?[key] ?? '';
+  }
+}

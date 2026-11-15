@@ -4,8 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:image_picker/image_picker.dart';
 import 'dart:io' show Platform;
+import 'package:shadhinjatradriver/services/driver_background_service.dart';
 
 class AuthService {
+  static const String defaultLanguage = 'en';
   static String? _resolvedWebBaseUrl;
 
   static String get baseUrl {
@@ -51,17 +53,32 @@ class AuthService {
 
   static const String userAgent = 'ShadhinJatraDriver/1.0';
 
+  /// Get currently active language code (defaults to English International: 'en')
+  static Future<String> getLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('selected_language') ?? defaultLanguage;
+  }
+
+  /// Set selected language locally
+  static Future<void> setLanguage(String languageCode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('selected_language', languageCode);
+  }
+
   static Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('auth_token');
   }
 
+  /// Global request headers carrying current auth token and dynamic Accept-Language
   static Future<Map<String, String>> getHeaders() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
+    final lang = prefs.getString('selected_language') ?? defaultLanguage;
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      'Accept-Language': lang,
       if (!kIsWeb) 'User-Agent': userAgent,
       if (token != null) 'Authorization': 'Bearer $token',
     };
@@ -69,6 +86,7 @@ class AuthService {
 
   static Future<Map<String, dynamic>> login(String email, String password) async {
     final candidates = candidateUrls;
+    final lang = await getLanguage();
     dynamic lastError;
 
     for (final candidate in candidates) {
@@ -78,6 +96,7 @@ class AuthService {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
+            'Accept-Language': lang,
           },
           body: jsonEncode({
             'email': email,
@@ -108,9 +127,14 @@ class AuthService {
 
   static Future<Map<String, dynamic>> register(String name, String email, String phone, String vehicleType, String password) async {
     try {
+      final lang = await getLanguage();
       final response = await http.post(
         Uri.parse('$baseUrl/register'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Accept-Language': lang,
+        },
         body: jsonEncode({
           'name': name,
           'email': email,
@@ -157,20 +181,15 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> fetchDriverHomeData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    
-    if (token == null) {
-       return {'success': false, 'message': 'No authentication token found'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) {
+      return {'success': false, 'message': 'No authentication token found'};
     }
 
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/driver/home'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
 
       if (response.statusCode == 200) {
@@ -189,17 +208,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> fetchNearbyRideRequests() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/driver/nearby-requests'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
 
       if (response.statusCode == 200) {
@@ -222,18 +237,13 @@ class AuthService {
     String? reason,
     bool? gpsEnabled,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/status'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: headers,
         body: jsonEncode({
           'is_online': isOnline,
           if (reason != null) 'reason': reason,
@@ -253,18 +263,13 @@ class AuthService {
     double? lat,
     double? lng,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/heartbeat'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: headers,
         body: jsonEncode({
           'is_background': isBackground,
           'gps_enabled': gpsEnabled,
@@ -288,18 +293,13 @@ class AuthService {
     bool isBackground = false,
     bool gpsEnabled = true,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return null;
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return null;
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/location'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: headers,
         body: jsonEncode({
           'latitude': lat,
           'longitude': lng,
@@ -318,18 +318,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> updateRideStatus(int rideId, String status, {double? lat, double? lng, String? otp}) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/rides/$rideId/status'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: headers,
         body: jsonEncode({
           'status': status,
           if (lat != null) 'latitude': lat,
@@ -345,18 +340,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> acceptRide(int rideId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/ride/$rideId/accept'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
 
       return jsonDecode(response.body);
@@ -366,18 +356,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> rejectRide(int rideId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/ride/$rideId/reject'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
 
       return jsonDecode(response.body);
@@ -387,18 +372,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> timeoutRide(int rideId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/ride/$rideId/timeout'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
 
       return jsonDecode(response.body);
@@ -410,15 +390,46 @@ class AuthService {
   /// Alias for rejectRide
   static Future<Map<String, dynamic>> declineRide(int rideId) => rejectRide(rideId);
 
-  /// Cancel active ride by driver with reason
+  static String _getDefaultCancelReason(String lang) {
+    switch (lang) {
+      case 'bn':
+        return 'ড্রাইভার কর্তৃক বাতিল';
+      case 'ar':
+        return 'تم الإلغاء من قبل السائق';
+      case 'hi':
+        return 'ड्राइवर द्वारा रद्द';
+      case 'es':
+        return 'Cancelado por el conductor';
+      case 'fr':
+        return 'Annulé par le conducteur';
+      case 'zh':
+        return '司机已取消';
+      case 'pt':
+        return 'Cancelado pelo motorista';
+      case 'ru':
+        return 'Отменено водителем';
+      case 'id':
+        return 'Dibatalkan oleh pengemudi';
+      case 'tr':
+        return 'Sürücü tarafından iptal edildi';
+      case 'de':
+        return 'Vom Fahrer storniert';
+      case 'en':
+      default:
+        return 'Cancelled by driver';
+    }
+  }
+
+  /// Cancel active ride by driver with reason (dynamically localized)
   static Future<Map<String, dynamic>> cancelRide(int rideId, {String? reason}) async {
     final headers = await getHeaders();
+    final lang = await getLanguage();
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/rides/$rideId/cancel'),
         headers: headers,
         body: jsonEncode({
-          'reason': reason ?? 'ড্রাইভার কর্তৃক বাতিল',
+          'reason': reason ?? _getDefaultCancelReason(lang),
         }),
       );
       return jsonDecode(response.body);
@@ -602,17 +613,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> checkRideStatus(int rideId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/driver/ride/$rideId/status'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
 
       return jsonDecode(response.body);
@@ -622,8 +629,8 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> uploadAvatar(XFile image) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
+    final headers = await getHeaders();
+    final token = await getToken();
     
     if (token == null) {
        return {'success': false, 'message': 'No authentication token found'};
@@ -634,6 +641,7 @@ class AuthService {
       request.headers.addAll({
         'Authorization': 'Bearer $token',
         'Accept': 'application/json',
+        'Accept-Language': headers['Accept-Language'] ?? defaultLanguage,
       });
       
       final bytes = await image.readAsBytes();
@@ -658,18 +666,13 @@ class AuthService {
   }
 
   static Future<void> updateFcmToken(String fcmToken) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return;
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return;
 
     try {
       await http.post(
         Uri.parse('$baseUrl/fcm-token'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
         body: jsonEncode({'fcm_token': fcmToken}),
       );
     } catch (e) {
@@ -677,8 +680,17 @@ class AuthService {
     }
   }
 
+  /// Update app language preference locally and on the server.
+  /// Also synchronizes background notification with the newly selected language.
   static Future<Map<String, dynamic>> updateLanguage(String languageCode) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('selected_language', languageCode);
+
+    // Update ongoing Android notification if background service is running
+    try {
+      DriverBackgroundService.instance.updateNotificationLanguage(languageCode);
+    } catch (_) {}
+
     final token = prefs.getString('auth_token');
     if (token == null) return {'success': false, 'message': 'Not logged in'};
 
@@ -689,6 +701,7 @@ class AuthService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
           'Accept': 'application/json',
+          'Accept-Language': languageCode,
         },
         body: jsonEncode({'language': languageCode}),
       );
@@ -710,17 +723,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> fetchRoute(double startLat, double startLng, double endLat, double endLng) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/map/route?start=$startLng,$startLat&end=$endLng,$endLat'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
 
       return jsonDecode(response.body);
@@ -728,10 +737,10 @@ class AuthService {
       return {'success': false, 'message': 'Network error'};
     }
   }
+
   static Future<Map<String, dynamic>> fetchNotifications({String? category}) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final uri = category != null && category.isNotEmpty && category != 'all'
@@ -739,10 +748,7 @@ class AuthService {
           : Uri.parse('$baseUrl/driver/notifications');
       final response = await http.get(
         uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -751,17 +757,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> fetchUnreadNotificationsCount() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'unread_count': 0};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'unread_count': 0};
 
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/driver/notifications/unread-count'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -770,17 +772,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> clearAllNotifications() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.delete(
         Uri.parse('$baseUrl/driver/notifications/clear-all'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -789,17 +787,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> seedSampleNotifications() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/notifications/seed-samples'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -808,18 +802,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> toggleDriverNotifications(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/notifications/toggle'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
+        headers: headers,
         body: jsonEncode({'enabled': enabled}),
       );
       return jsonDecode(response.body);
@@ -829,18 +818,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> confirmRideFromNotification(int id) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/notifications/$id/confirm'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
+        headers: headers,
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -849,18 +833,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> rejectRideFromNotification(int id) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/notifications/$id/reject'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
+        headers: headers,
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -869,17 +848,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> deleteNotification(int id) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.delete(
         Uri.parse('$baseUrl/driver/notifications/$id'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -888,17 +863,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> markNotificationAsRead(int id) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/notifications/$id/read'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -907,17 +878,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> markAllNotificationsAsRead() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/notifications/mark-read'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -926,17 +893,13 @@ class AuthService {
   }
 
   static Future<Map<String, dynamic>> fetchEarnings(int days) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null) return {'success': false, 'message': 'Not logged in'};
+    final headers = await getHeaders();
+    if (!headers.containsKey('Authorization')) return {'success': false, 'message': 'Not logged in'};
 
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/driver/earnings?days=$days'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+        headers: headers,
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -1072,6 +1035,7 @@ class AuthService {
 
   static Future<Map<String, dynamic>> sendChatMessage(int rideId, String message, {String? imagePath, String? attachmentUrl}) async {
     final token = await getToken();
+    final headers = await getHeaders();
     try {
       if (imagePath != null && imagePath.isNotEmpty) {
         final request = http.MultipartRequest(
@@ -1080,6 +1044,7 @@ class AuthService {
         );
         if (token != null) request.headers['Authorization'] = 'Bearer $token';
         request.headers['Accept'] = 'application/json';
+        request.headers['Accept-Language'] = headers['Accept-Language'] ?? defaultLanguage;
         if (message.isNotEmpty) {
           request.fields['message'] = message;
         }
@@ -1088,7 +1053,6 @@ class AuthService {
         final response = await http.Response.fromStream(streamedResponse);
         return jsonDecode(response.body);
       } else {
-        final headers = await getHeaders();
         final response = await http.post(
           Uri.parse('$baseUrl/driver/chats/$rideId/send'),
           headers: headers,
@@ -1130,7 +1094,6 @@ class AuthService {
     }
   }
 
-
   static Future<Map<String, dynamic>> fetchChatRealtimeConfig() async {
     final headers = await getHeaders();
     try {
@@ -1157,7 +1120,6 @@ class AuthService {
     }
   }
 
-
   static Future<Map<String, dynamic>> fetchVehicle() async {
     final headers = await getHeaders();
     try {
@@ -1181,7 +1143,6 @@ class AuthService {
       return {'success': false, 'message': 'Network error: $e'};
     }
   }
-
 
   static Future<Map<String, dynamic>> fetchEmergencyContact() async {
     final headers = await getHeaders();
@@ -1601,6 +1562,36 @@ class AuthService {
   // DRIVER BACKGROUND TRACKING & SYSTEM API
   // ==========================================
 
+  static String _getConnectionLostMessage(String lang, dynamic error) {
+    switch (lang) {
+      case 'bn':
+        return 'ইন্টারনেট সংযোগ বিচ্ছিন্ন (Connection Lost): $error';
+      case 'ar':
+        return 'فقدان الاتصال بالإنترنت: $error';
+      case 'hi':
+        return 'इंटरनेट कनेक्शन कट गया: $error';
+      case 'es':
+        return 'Conexión a internet perdida: $error';
+      case 'fr':
+        return 'Connexion Internet perdue: $error';
+      case 'zh':
+        return '网络连接已断开: $error';
+      case 'pt':
+        return 'Conexão de internet perdida: $error';
+      case 'ru':
+        return 'Потеряно подключение к Интернету: $error';
+      case 'id':
+        return 'Koneksi internet terputus: $error';
+      case 'tr':
+        return 'İnternet bağlantısı kesildi: $error';
+      case 'de':
+        return 'Internetverbindung verloren: $error';
+      case 'en':
+      default:
+        return 'Internet connection lost: $error';
+    }
+  }
+
   /// Send dedicated background heartbeat with location, screen state & battery
   static Future<Map<String, dynamic>> sendBackgroundHeartbeat({
     double? lat,
@@ -1636,10 +1627,11 @@ class AuthService {
       );
       return jsonDecode(response.body);
     } catch (e) {
+      final lang = await getLanguage();
       return {
         'success': false,
         'is_connection_error': true,
-        'message': 'ইন্টারনেট সংযোগ বিচ্ছিন্ন (Connection Lost): $e',
+        'message': _getConnectionLostMessage(lang, e),
       };
     }
   }

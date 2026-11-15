@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:easy_localization/easy_localization.dart';
+import 'package:easy_localization/easy_localization.dart' hide TextDirection;
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shadhinjatradriver/services/auth_service.dart';
@@ -54,16 +54,24 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   bool get _isRideChat => widget.rideId != null;
 
-  // Quick reply templates for drivers on the go (matching Dribbble reference)
-  final List<String> _quickReplies = [
-    'Hello 👋',
-    'আমি পিকআপ স্থানে পৌঁছেছি 📍',
-    'Where are you? 🚗',
-    '৫ মিনিটের মধ্যে পৌঁছাবো ⏳',
-    'যানজটে আটকা পড়েছি 🚦',
-    'আমি আপনার জন্য অপেক্ষা করছি',
-    'ধন্যবাদ! 🙏',
-  ];
+  String _t(BuildContext context, String key) {
+    final code = context.locale.languageCode;
+    return _ChatLocalization.values[code]?[key] ??
+        _ChatLocalization.values['en']?[key] ??
+        key;
+  }
+
+  List<String> _getQuickReplies(BuildContext context) {
+    return [
+      _t(context, 'qr_hello'),
+      _t(context, 'qr_arrived'),
+      _t(context, 'qr_where'),
+      _t(context, 'qr_5min'),
+      _t(context, 'qr_traffic'),
+      _t(context, 'qr_waiting'),
+      _t(context, 'qr_thanks'),
+    ];
+  }
 
   @override
   void initState() {
@@ -77,7 +85,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _initRideChat() async {
-    // 1. Fetch dynamic realtime config (polling interval, mode)
     try {
       final config = await AuthService.fetchChatRealtimeConfig();
       if (config['success'] == true && config['data'] != null) {
@@ -89,10 +96,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       }
     } catch (_) {}
 
-    // 2. Fetch initial chat history
     await _fetchRideMessages();
 
-    // 3. Dynamic delta polling for Shared Hosts & Local Servers without SSH access
     _pollingTimer = Timer.periodic(Duration(milliseconds: _pollingIntervalMs), (timer) {
       if (mounted) _fetchRideMessages(silent: true);
     });
@@ -111,7 +116,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   Future<void> _makePhoneCall(String? phone) async {
     if (phone == null || phone.isEmpty || phone == 'ফোন নম্বর নেই') {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('যাত্রীর কোনো বৈধ ফোন নম্বর পাওয়া যায়নি')),
+        SnackBar(content: Text(_t(context, 'no_valid_phone'))),
       );
       return;
     }
@@ -122,13 +127,13 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         await launchUrl(uri);
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('কল করা যাচ্ছে না: $phone')),
+          SnackBar(content: Text('${_t(context, 'cannot_call')}: $phone')),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('কল করতে ত্রুটি: $phone')),
+          SnackBar(content: Text('${_t(context, 'call_error')}: $phone')),
         );
       }
     }
@@ -165,12 +170,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     }
   }
 
-  // --- Ride Chat Logic (Delta-Fetch & Full Fetch) ---
+  // --- Ride Chat Logic ---
   Future<void> _fetchRideMessages({bool silent = false}) async {
     if (widget.rideId == null) return;
     try {
       if (silent && _lastMessageId > 0) {
-        // Delta-fetch: only fetch new messages created after _lastMessageId
         final result = await AuthService.fetchNewChatMessages(widget.rideId!, _lastMessageId);
         if (result['success'] == true && mounted) {
           final List<dynamic> newItems = result['data'] ?? [];
@@ -183,7 +187,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           }
         }
       } else {
-        // Full fetch on initial load or screen resume
         final result = await AuthService.fetchChatMessages(widget.rideId!);
         if (result['success'] == true && mounted) {
           final List<dynamic> fetched = result['data']?['messages'] ?? result['data'] ?? [];
@@ -227,55 +230,59 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('ছবি নির্বাচন করতে সমস্যা হয়েছে: $e')),
+          SnackBar(content: Text('${_t(context, 'image_select_error')}: $e')),
         );
       }
     }
   }
 
   void _showImagePickerSheet() {
+    final bool isRtl = context.locale.languageCode == 'ar';
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'ছবি সংযুক্ত করুন (Attach Image)',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                const SizedBox(height: 16),
-                ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.blue.shade50,
-                    child: Icon(Icons.camera_alt_rounded, color: Colors.blue.shade700),
+      builder: (ctx) {
+        return Directionality(
+          textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _t(context, 'attach_image_title'),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
-                  title: const Text('ক্যামেরা দিয়ে ছবি তুলুন (Camera)'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _pickImage(ImageSource.camera);
-                  },
-                ),
-                ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.orange.shade50,
-                    child: Icon(Icons.photo_library_rounded, color: Colors.orange.shade700),
+                  const SizedBox(height: 16),
+                  ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.blue.shade50,
+                      child: Icon(Icons.camera_alt_rounded, color: Colors.blue.shade700),
+                    ),
+                    title: Text(_t(context, 'take_photo')),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _pickImage(ImageSource.camera);
+                    },
                   ),
-                  title: const Text('গ্যালারি থেকে বেছে নিন (Gallery)'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _pickImage(ImageSource.gallery);
-                  },
-                ),
-              ],
+                  ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.orange.shade50,
+                      child: Icon(Icons.photo_library_rounded, color: Colors.orange.shade700),
+                    ),
+                    title: Text(_t(context, 'choose_gallery')),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _pickImage(ImageSource.gallery);
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -301,14 +308,14 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       _selectedImageFile = null;
     });
 
-    // Optimistic UI update
     final tempId = DateTime.now().millisecondsSinceEpoch;
+    final sendingImgText = _t(context, 'sending_image_placeholder');
     setState(() {
       _messages.add({
         'id': tempId,
         'sender': 'driver',
-        'text': text.isNotEmpty ? text : '📷 [ছবি পাঠানো হচ্ছে...]',
-        'message': text.isNotEmpty ? text : '📷 [ছবি পাঠানো হচ্ছে...]',
+        'text': text.isNotEmpty ? text : sendingImgText,
+        'message': text.isNotEmpty ? text : sendingImgText,
         'attachment_url': imagePath.isNotEmpty ? imagePath : null,
         'is_me': true,
         'is_read': false,
@@ -327,7 +334,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         _fetchRideMessages(silent: true);
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result['message'] ?? 'মেসেজ পাঠানো সম্ভব হয়নি')),
+          SnackBar(content: Text(result['message'] ?? _t(context, 'msg_send_failed'))),
         );
       }
     } catch (e) {
@@ -346,9 +353,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       final result = await AuthService.deleteChatMessage(messageId);
       if (result['success'] == true && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('বার্তাটি মুছে ফেলা হয়েছে'),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: Text(_t(context, 'message_deleted')),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -359,35 +366,39 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   // --- Clear Entire Chat Conversation ---
   Future<void> _clearAllMessages() async {
+    final bool isRtl = context.locale.languageCode == 'ar';
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.delete_sweep_rounded, color: Colors.red),
-            SizedBox(width: 8),
-            Text('চ্যাট মুছে ফেলবেন?'),
+      builder: (ctx) => Directionality(
+        textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              const Icon(Icons.delete_sweep_rounded, color: Colors.red),
+              const SizedBox(width: 8),
+              Text(_t(context, 'clear_chat_title')),
+            ],
+          ),
+          content: Text(
+            _t(context, 'clear_chat_desc'),
+            style: const TextStyle(fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(_t(context, 'no_cancel'), style: const TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(_t(context, 'yes_delete')),
+            ),
           ],
         ),
-        content: const Text(
-          'আপনি কি নিশ্চিত যে এই রাইডের সমস্ত চ্যাট বার্তা মুছে ফেলতে চান? এটি আর ফিরিয়ে আনা যাবে না।',
-          style: TextStyle(fontSize: 14),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('না, বাতিল', style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('হ্যাঁ, মুছে ফেলুন'),
-          ),
-        ],
       ),
     );
 
@@ -399,7 +410,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         final result = await AuthService.clearChatMessages(widget.rideId!);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(result['message'] ?? 'চ্যাট সফলভাবে মুছে ফেলা হয়েছে')),
+            SnackBar(content: Text(result['message'] ?? _t(context, 'chat_cleared_success'))),
           );
         }
       } catch (e) {
@@ -408,93 +419,97 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     }
   }
 
-  // --- Long Press Context Menu & Reactions (Dribbble Screen 3) ---
+  // --- Long Press Context Menu & Reactions ---
   void _showMessageOptionsSheet(Map<String, dynamic> msg) {
     final int? msgId = msg['id'] is int ? msg['id'] : null;
     final String text = msg['text'] ?? msg['message'] ?? '';
     final bool isMe = (msg['is_me'] == true) || (msg['sender'] == 'driver');
+    final bool isRtl = context.locale.languageCode == 'ar';
 
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Container(
-          margin: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: const [
-              BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 4)),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Emoji Reaction Bar (Dribbble screen 3)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      builder: (ctx) {
+        return Directionality(
+          textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+          child: Container(
+            margin: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: const [
+                BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 4)),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Emoji Reaction Bar
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: ['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) {
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('$emoji ${_t(context, 'reaction_added')}'),
+                              duration: const Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(6.0),
+                          child: Text(emoji, style: const TextStyle(fontSize: 24)),
+                        ),
+                      );
+                    }).toList(),
+                  ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: ['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) {
-                    return InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      onTap: () {
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('$emoji প্রতিক্রিয়া যোগ করা হয়েছে'),
-                            duration: const Duration(seconds: 1),
-                          ),
-                        );
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.all(6.0),
-                        child: Text(emoji, style: const TextStyle(fontSize: 24)),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
 
-              // Action Options
-              ListTile(
-                leading: const Icon(Icons.copy_rounded, color: Colors.blueAccent),
-                title: const Text('বার্তা কপি করুন (Copy)'),
-                onTap: () {
-                  Navigator.pop(context);
-                  if (text.isNotEmpty) {
-                    Clipboard.setData(ClipboardData(text: text));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('টেক্সট কপি করা হয়েছে')),
-                    );
-                  }
-                },
-              ),
-              if (isMe && msgId != null)
+                // Action Options
                 ListTile(
-                  leading: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
-                  title: const Text('মেসেজটি মুছুন (Delete)'),
+                  leading: const Icon(Icons.copy_rounded, color: Colors.blueAccent),
+                  title: Text(_t(context, 'copy_message')),
                   onTap: () {
-                    Navigator.pop(context);
-                    _deleteMessage(msgId);
+                    Navigator.pop(ctx);
+                    if (text.isNotEmpty) {
+                      Clipboard.setData(ClipboardData(text: text));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(_t(context, 'text_copied'))),
+                      );
+                    }
                   },
                 ),
-              ListTile(
-                leading: const Icon(Icons.report_problem_outlined, color: Colors.orangeAccent),
-                title: const Text('রিপোর্ট বা সহায়তা (Help/Report)'),
-                onTap: () {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('সহায়তার জন্য হেল্পলাইন কল করুন')),
-                  );
-                },
-              ),
-              const SizedBox(height: 8),
-            ],
+                if (isMe && msgId != null)
+                  ListTile(
+                    leading: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                    title: Text(_t(context, 'delete_message')),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _deleteMessage(msgId);
+                    },
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.report_problem_outlined, color: Colors.orangeAccent),
+                  title: Text(_t(context, 'help_report')),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(_t(context, 'helpline_prompt'))),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         );
       },
@@ -505,7 +520,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   void _viewFullImage(String imageUrl) {
     showDialog(
       context: context,
-      builder: (context) => Dialog(
+      builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: const EdgeInsets.all(12),
         child: Stack(
@@ -519,7 +534,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 errorBuilder: (_, __, ___) => Container(
                   color: Colors.black87,
                   padding: const EdgeInsets.all(32),
-                  child: const Text('ছবি লোড করা সম্ভব হয়নি', style: TextStyle(color: Colors.white)),
+                  child: Text(_t(context, 'image_load_failed'), style: const TextStyle(color: Colors.white)),
                 ),
               ),
             ),
@@ -528,7 +543,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 backgroundColor: Colors.black54,
                 child: Icon(Icons.close_rounded, color: Colors.white, size: 20),
               ),
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(ctx),
             ),
           ],
         ),
@@ -550,18 +565,21 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    if (_isRideChat) {
-      return _buildRideChatView();
-    }
-    return _buildInboxView();
+    final bool isRtl = context.locale.languageCode == 'ar';
+
+    return Directionality(
+      textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+      child: _isRideChat ? _buildRideChatView(isRtl) : _buildInboxView(isRtl),
+    );
   }
 
-  // ===========================================================================
-  // DIRECT RIDE CHAT VIEW (Matching Dribbble UI: media_1793721399142_e3b15813.png)
-  // ===========================================================================
-  Widget _buildRideChatView() {
-    final title = widget.otherPersonName ?? 'যাত্রী (Passenger)';
-    final subtitle = '${widget.vehicleInfo ?? 'সক্রিয় রাইড চ্যাট'} • ${_realtimeMode == 'reverb' ? 'লাইভ' : 'অনলাইন'}';
+  // DIRECT RIDE CHAT VIEW
+  Widget _buildRideChatView(bool isRtl) {
+    final title = widget.otherPersonName ?? _t(context, 'passenger_default');
+    final liveText = _realtimeMode == 'reverb' ? _t(context, 'live_status') : _t(context, 'online_status');
+    final activeRideChatText = widget.vehicleInfo ?? _t(context, 'active_ride_chat');
+    final subtitle = '$activeRideChatText • $liveText';
+    final quickReplies = _getQuickReplies(context);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
@@ -572,7 +590,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         titleSpacing: 0,
         title: Row(
           children: [
-            // Avatar with online status badge
             Stack(
               children: [
                 CircleAvatar(
@@ -626,7 +643,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           ],
         ),
         actions: [
-          // Voice / Phone Call Action (Dribbble Header)
           IconButton(
             icon: Container(
               padding: const EdgeInsets.all(7),
@@ -636,10 +652,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               ),
               child: Icon(Icons.call_rounded, color: Colors.blue.shade700, size: 18),
             ),
-            tooltip: 'কল করুন (Voice/Phone Call)',
+            tooltip: _t(context, 'call_action_tooltip'),
             onPressed: () => _makePhoneCall(widget.otherPersonPhone),
           ),
-          // 3-dots popup menu
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert_rounded, color: Colors.grey.shade700),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -651,23 +666,23 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               }
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'refresh',
                 child: Row(
                   children: [
-                    Icon(Icons.refresh_rounded, size: 18, color: Colors.blue),
-                    SizedBox(width: 8),
-                    Text('রিফ্রেশ করুন'),
+                    const Icon(Icons.refresh_rounded, size: 18, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    Text(_t(context, 'refresh')),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'clear',
                 child: Row(
                   children: [
-                    Icon(Icons.delete_sweep_rounded, size: 18, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('সকল মেসেজ মুছুন (Clear All)'),
+                    const Icon(Icons.delete_sweep_rounded, size: 18, color: Colors.red),
+                    const SizedBox(width: 8),
+                    Text(_t(context, 'clear_all')),
                   ],
                 ),
               ),
@@ -678,7 +693,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       ),
       body: Column(
         children: [
-          // Dribbble Safety Disclaimer Notice Card
+          // Safety Disclaimer Notice Card
           Container(
             width: double.infinity,
             margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -694,20 +709,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 Icon(Icons.shield_outlined, color: Colors.amber.shade900, size: 18),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: RichText(
-                    text: TextSpan(
-                      style: const TextStyle(fontSize: 11.5, color: Color(0xFF78350F), height: 1.3),
-                      children: const [
-                        TextSpan(
-                          text: 'Please note, your conversations are recorded for safety.\n',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        TextSpan(
-                          text: 'নিরাপত্তার স্বার্থে আপনার সকল বার্তা ও কথোপকথন রেকর্ড রাখা হচ্ছে।',
-                          style: TextStyle(color: Colors.black87),
-                        ),
-                      ],
-                    ),
+                  child: Text(
+                    _t(context, 'safety_disclaimer'),
+                    style: const TextStyle(fontSize: 11.5, color: Color(0xFF78350F), height: 1.3),
                   ),
                 ),
               ],
@@ -731,7 +735,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                       ),
           ),
 
-          // Quick Reply Suggestion Pills (Horizontally Scrollable)
+          // Quick Reply Suggestion Pills
           Container(
             color: Colors.transparent,
             padding: const EdgeInsets.symmetric(vertical: 4),
@@ -739,7 +743,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: Row(
-                children: _quickReplies.map((reply) {
+                children: quickReplies.map((reply) {
                   return Padding(
                     padding: const EdgeInsets.only(right: 8.0),
                     child: InkWell(
@@ -775,7 +779,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
             ),
           ),
 
-          // Selected Image Preview Thumbnail (if any)
+          // Selected Image Preview Thumbnail
           if (_selectedImageFile != null)
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
@@ -808,7 +812,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('সংযুক্ত ছবি (Selected Image)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        Text(_t(context, 'attached_image'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                         Text(_selectedImageFile!.name, style: TextStyle(fontSize: 11, color: Colors.grey.shade600), maxLines: 1),
                       ],
                     ),
@@ -821,7 +825,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               ),
             ),
 
-          // Message Input Field & Action Bar (Dribbble Input Bar)
+          // Message Input Field
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
@@ -831,24 +835,22 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
             child: SafeArea(
               child: Row(
                 children: [
-                  // Image Attachment Icon Button (Camera/Gallery)
                   IconButton(
                     icon: Icon(
                       _selectedImageFile != null ? Icons.image_rounded : Icons.camera_alt_outlined,
                       color: _selectedImageFile != null ? const Color(0xFF2563EB) : Colors.grey.shade600,
                       size: 22,
                     ),
-                    tooltip: 'ছবি পাঠান (Attach Image)',
+                    tooltip: _t(context, 'attach_image_tooltip'),
                     onPressed: _showImagePickerSheet,
                   ),
-                  // Text Message Input
                   Expanded(
                     child: TextField(
                       controller: _messageController,
                       textInputAction: TextInputAction.send,
                       onSubmitted: (_) => _sendMessage(),
                       decoration: InputDecoration(
-                        hintText: 'Start a message to passenger...',
+                        hintText: _t(context, 'input_hint'),
                         hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
@@ -861,7 +863,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Circular Blue Send Button
                   CircleAvatar(
                     backgroundColor: const Color(0xFF2563EB),
                     radius: 22,
@@ -885,7 +886,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     );
   }
 
-  // --- Message Bubble Widget (Dribbble Look & Feel) ---
+  // --- Message Bubble Widget ---
   Widget _buildMessageBubble(Map<String, dynamic> msg) {
     final bool isMe = (msg['is_me'] == true) || (msg['sender'] == 'driver');
     final String text = msg['text'] ?? msg['message'] ?? '';
@@ -922,7 +923,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           child: Column(
             crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
-              // Image attachment if available
               if (attachmentUrl != null && attachmentUrl.isNotEmpty) ...[
                 GestureDetector(
                   onTap: () => _viewFullImage(attachmentUrl),
@@ -949,12 +949,12 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                         errorBuilder: (_, __, ___) => Container(
                           padding: const EdgeInsets.all(12),
                           color: Colors.grey.shade300,
-                          child: const Row(
+                          child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.broken_image_rounded, size: 18),
-                              SizedBox(width: 6),
-                              Text('ছবি লোড করা যায়নি', style: TextStyle(fontSize: 11)),
+                              const Icon(Icons.broken_image_rounded, size: 18),
+                              const SizedBox(width: 6),
+                              Text(_t(context, 'image_load_failed'), style: const TextStyle(fontSize: 11)),
                             ],
                           ),
                         ),
@@ -962,11 +962,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                     ),
                   ),
                 ),
-                if (text.isNotEmpty && text != '📷 [ছবি সংযুক্ত]') const SizedBox(height: 6),
+                if (text.isNotEmpty && !text.startsWith('📷')) const SizedBox(height: 6),
               ],
-
-              // Message Text
-              if (text.isNotEmpty && (attachmentUrl == null || text != '📷 [ছবি সংযুক্ত]'))
+              if (text.isNotEmpty && (attachmentUrl == null || !text.startsWith('📷')))
                 Text(
                   text,
                   style: TextStyle(
@@ -976,10 +974,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                     height: 1.3,
                   ),
                 ),
-
               const SizedBox(height: 4),
-
-              // Time and delivery status
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1023,13 +1018,13 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               child: Icon(Icons.chat_bubble_outline_rounded, size: 44, color: Colors.blue.shade700),
             ),
             const SizedBox(height: 14),
-            const Text(
-              'যাত্রীর সঙ্গে নতুন বার্তা শুরু করুন',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87),
+            Text(
+              _t(context, 'empty_chat_title'),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87),
             ),
             const SizedBox(height: 6),
             Text(
-              'পিকআপ লোকেশন, ট্রাফিক পরিস্থিতি বা যেকোনো নির্দেশনার জন্য বার্তা পাঠান।',
+              _t(context, 'empty_chat_desc'),
               style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               textAlign: TextAlign.center,
             ),
@@ -1039,21 +1034,22 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     );
   }
 
-  // ===========================================================================
-  // INBOX MODE VIEW (With 3 Tabs: All Messages, Active Ride Chats, Previous Chats)
-  // ===========================================================================
-  Widget _buildInboxView() {
+  // INBOX MODE VIEW
+  Widget _buildInboxView(bool isRtl) {
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
       appBar: AppBar(
-        title: const Text('বার্তা ও যোগাযোগ (Chat Inbox)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+        title: Text(
+          _t(context, 'inbox_title'),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+        ),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
         elevation: 0.5,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'রিফ্রেশ করুন',
+            tooltip: _t(context, 'refresh'),
             onPressed: () {
               setState(() => _isLoadingInbox = true);
               _fetchInboxData();
@@ -1072,7 +1068,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('সব বার্তা'),
+                  Text(_t(context, 'tab_all')),
                   const SizedBox(width: 4),
                   _buildCountBadge(_counts['all'] ?? _allMessages.length),
                 ],
@@ -1082,7 +1078,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('চলমান রাইড'),
+                  Text(_t(context, 'tab_active')),
                   const SizedBox(width: 4),
                   _buildCountBadge(_counts['active'] ?? _activeChats.length, isHighlighted: true),
                 ],
@@ -1092,7 +1088,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('পূর্ববর্তী'),
+                  Text(_t(context, 'tab_previous')),
                   const SizedBox(width: 4),
                   _buildCountBadge(_counts['previous'] ?? _previousChats.length),
                 ],
@@ -1106,9 +1102,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           : TabBarView(
               controller: _tabController,
               children: [
-                _buildChatListSection(_allMessages, 'সব বার্তার তালিকা খালি'),
-                _buildChatListSection(_activeChats, 'কোনো চলমান রাইডের চ্যাট নেই'),
-                _buildChatListSection(_previousChats, 'কোনো পূর্ববর্তী রাইডের চ্যাট নেই'),
+                _buildChatListSection(_allMessages, _t(context, 'empty_all')),
+                _buildChatListSection(_activeChats, _t(context, 'empty_active')),
+                _buildChatListSection(_previousChats, _t(context, 'empty_previous')),
               ],
             ),
     );
@@ -1161,7 +1157,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'রাইড চলাকালীন যাত্রীর বার্তা ও ইতিহাস এখানে প্রদর্শিত হবে।',
+                        _t(context, 'empty_section_hint'),
                         style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                         textAlign: TextAlign.center,
                       ),
@@ -1183,12 +1179,12 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         separatorBuilder: (context, index) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
           final chat = list[index];
-          final String name = chat['passenger_name'] ?? 'যাত্রী (Passenger)';
+          final String name = chat['passenger_name'] ?? _t(context, 'passenger_default');
           final String phone = chat['passenger_phone'] ?? '';
           final int unreadCount = chat['unread_count'] ?? 0;
           final String status = chat['ride_status'] ?? '';
           final bool isActive = chat['is_active'] == true;
-          final String vehicle = chat['vehicle_type'] ?? 'কার / বাইক';
+          final String vehicle = chat['vehicle_type'] ?? _t(context, 'default_vehicle');
 
           return Container(
             decoration: BoxDecoration(
@@ -1256,7 +1252,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        isActive ? 'চলমান' : status.toUpperCase(),
+                        isActive ? _t(context, 'status_ongoing') : status.toUpperCase(),
                         style: TextStyle(
                           fontSize: 9.5,
                           fontWeight: FontWeight.bold,
@@ -1272,14 +1268,14 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '$vehicle • ${chat['pickup'] ?? 'পিকআপ স্থান'}',
+                      '$vehicle • ${chat['pickup'] ?? _t(context, 'pickup_point_default')}',
                       style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      chat['last_message'] ?? 'চ্যাট শুরু করতে ট্যাপ করুন',
+                      chat['last_message'] ?? _t(context, 'tap_to_start_chat'),
                       style: TextStyle(
                         fontSize: 12.5,
                         color: unreadCount > 0 ? Colors.black87 : Colors.grey.shade600,
@@ -1294,7 +1290,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Phone Call Shortcut Button on Card
                   if (phone.isNotEmpty && phone != 'ফোন নম্বর নেই')
                     IconButton(
                       icon: Container(
@@ -1305,7 +1300,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                         ),
                         child: Icon(Icons.call_rounded, color: Colors.green.shade700, size: 16),
                       ),
-                      tooltip: 'সরাসরি কল করুন ($phone)',
+                      tooltip: '${_t(context, 'call_direct')}: $phone',
                       onPressed: () => _makePhoneCall(phone),
                     ),
                   Column(
@@ -1353,4 +1348,705 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       ),
     );
   }
+}
+
+class _ChatLocalization {
+  static const Map<String, Map<String, String>> values = {
+    'en': {
+      'passenger_default': 'Passenger',
+      'active_ride_chat': 'Active Ride Chat',
+      'live_status': 'Live',
+      'online_status': 'Online',
+      'call_action_tooltip': 'Voice/Phone Call',
+      'refresh': 'Refresh',
+      'clear_all': 'Clear All Messages',
+      'safety_disclaimer': 'Please note, your conversations are recorded for safety.',
+      'attached_image': 'Attached Image',
+      'attach_image_tooltip': 'Attach Image',
+      'input_hint': 'Start a message to passenger...',
+      'image_load_failed': 'Failed to load image',
+      'empty_chat_title': 'Start a conversation with passenger',
+      'empty_chat_desc': 'Send messages regarding pickup location, traffic or trip notes.',
+      'inbox_title': 'Chat Inbox',
+      'tab_all': 'All Messages',
+      'tab_active': 'Active Rides',
+      'tab_previous': 'Previous',
+      'empty_all': 'All message history is empty',
+      'empty_active': 'No active ride chats found',
+      'empty_previous': 'No previous ride chats found',
+      'empty_section_hint': 'Messages and ride communications will be archived here.',
+      'default_vehicle': 'Car / Bike',
+      'status_ongoing': 'Ongoing',
+      'pickup_point_default': 'Pickup Point',
+      'tap_to_start_chat': 'Tap to start chat',
+      'call_direct': 'Direct Call',
+      'no_valid_phone': 'No valid phone number found for passenger',
+      'cannot_call': 'Cannot make phone call to',
+      'call_error': 'Error making call to',
+      'image_select_error': 'Failed to select image',
+      'attach_image_title': 'Attach Image',
+      'take_photo': 'Take a Photo (Camera)',
+      'choose_gallery': 'Choose from Gallery',
+      'sending_image_placeholder': '📷 [Sending image...]',
+      'msg_send_failed': 'Failed to send message',
+      'message_deleted': 'Message deleted successfully',
+      'clear_chat_title': 'Clear Chat History?',
+      'clear_chat_desc': 'Are you sure you want to delete all messages for this ride? This cannot be undone.',
+      'no_cancel': 'No, Cancel',
+      'yes_delete': 'Yes, Delete',
+      'chat_cleared_success': 'Chat history successfully cleared',
+      'reaction_added': 'reaction added',
+      'copy_message': 'Copy Message',
+      'delete_message': 'Delete Message',
+      'help_report': 'Help / Report',
+      'helpline_prompt': 'Please dial helpline for support',
+      'text_copied': 'Text copied to clipboard',
+
+      'qr_hello': 'Hello 👋',
+      'qr_arrived': 'I have arrived at pickup 📍',
+      'qr_where': 'Where are you? 🚗',
+      'qr_5min': 'Arriving in 5 minutes ⏳',
+      'qr_traffic': 'Stuck in traffic jam 🚦',
+      'qr_waiting': 'I am waiting for you',
+      'qr_thanks': 'Thank you! 🙏',
+    },
+    'bn': {
+      'passenger_default': 'যাত্রী (Passenger)',
+      'active_ride_chat': 'সক্রিয় রাইড চ্যাট',
+      'live_status': 'লাইভ',
+      'online_status': 'অনলাইন',
+      'call_action_tooltip': 'কল করুন (Voice/Phone Call)',
+      'refresh': 'রিফ্রেশ করুন',
+      'clear_all': 'সকল মেসেজ মুছুন (Clear All)',
+      'safety_disclaimer': 'নিরাপত্তার স্বার্থে আপনার সকল বার্তা ও কথোপকথন রেকর্ড রাখা হচ্ছে।',
+      'attached_image': 'সংযুক্ত ছবি (Selected Image)',
+      'attach_image_tooltip': 'ছবি পাঠান (Attach Image)',
+      'input_hint': 'যাত্রীকে বার্তা লিখুন...',
+      'image_load_failed': 'ছবি লোড করা সম্ভব হয়নি',
+      'empty_chat_title': 'যাত্রীর সঙ্গে নতুন বার্তা শুরু করুন',
+      'empty_chat_desc': 'পিকআপ লোকেশন, ট্রাফিক পরিস্থিতি বা যেকোনো নির্দেশনার জন্য বার্তা পাঠান।',
+      'inbox_title': 'বার্তা ও যোগাযোগ (Chat Inbox)',
+      'tab_all': 'সব বার্তা',
+      'tab_active': 'চলমান রাইড',
+      'tab_previous': 'পূর্ববর্তী',
+      'empty_all': 'সব বার্তার তালিকা খালি',
+      'empty_active': 'কোনো চলমান রাইডের চ্যাট নেই',
+      'empty_previous': 'কোনো পূর্ববর্তী রাইডের চ্যাট নেই',
+      'empty_section_hint': 'রাইড চলাকালীন যাত্রীর বার্তা ও ইতিহাস এখানে প্রদর্শিত হবে।',
+      'default_vehicle': 'কার / বাইক',
+      'status_ongoing': 'চলমান',
+      'pickup_point_default': 'পিকআপ স্থান',
+      'tap_to_start_chat': 'চ্যাট শুরু করতে ট্যাপ করুন',
+      'call_direct': 'সরাসরি কল করুন',
+      'no_valid_phone': 'যাত্রীর কোনো বৈধ ফোন নম্বর পাওয়া যায়নি',
+      'cannot_call': 'কল করা যাচ্ছে না',
+      'call_error': 'কল করতে ত্রুটি',
+      'image_select_error': 'ছবি নির্বাচন করতে সমস্যা হয়েছে',
+      'attach_image_title': 'ছবি সংযুক্ত করুন (Attach Image)',
+      'take_photo': 'ক্যামেরা দিয়ে ছবি তুলুন (Camera)',
+      'choose_gallery': 'গ্যালারি থেকে বেছে নিন (Gallery)',
+      'sending_image_placeholder': '📷 [ছবি পাঠানো হচ্ছে...]',
+      'msg_send_failed': 'মেসেজ পাঠানো সম্ভব হয়নি',
+      'message_deleted': 'বার্তাটি মুছে ফেলা হয়েছে',
+      'clear_chat_title': 'চ্যাট মুছে ফেলবেন?',
+      'clear_chat_desc': 'আপনি কি নিশ্চিত যে এই রাইডের সমস্ত চ্যাট বার্তা মুছে ফেলতে চান? এটি আর ফিরিয়ে আনা যাবে না।',
+      'no_cancel': 'না, বাতিল',
+      'yes_delete': 'হ্যাঁ, মুছে ফেলুন',
+      'chat_cleared_success': 'চ্যাট সফলভাবে মুছে ফেলা হয়েছে',
+      'reaction_added': 'প্রতিক্রিয়া যোগ করা হয়েছে',
+      'copy_message': 'বার্তা কপি করুন (Copy)',
+      'delete_message': 'মেসেজটি মুছুন (Delete)',
+      'help_report': 'রিপোর্ট বা সহায়তা (Help/Report)',
+      'helpline_prompt': 'সহায়তার জন্য হেল্পলাইন কল করুন',
+      'text_copied': 'টেক্সট কপি করা হয়েছে',
+
+      'qr_hello': 'Hello 👋',
+      'qr_arrived': 'আমি পিকআপ স্থানে পৌঁছেছি 📍',
+      'qr_where': 'Where are you? 🚗',
+      'qr_5min': '৫ মিনিটের মধ্যে পৌঁছাবো ⏳',
+      'qr_traffic': 'যানজটে আটকা পড়েছি 🚦',
+      'qr_waiting': 'আমি আপনার জন্য অপেক্ষা করছি',
+      'qr_thanks': 'ধন্যবাদ! 🙏',
+    },
+    'ar': {
+      'passenger_default': 'الراكب',
+      'active_ride_chat': 'محادثة المشوار النشط',
+      'live_status': 'مباشر',
+      'online_status': 'متصل',
+      'call_action_tooltip': 'اتصال هاتفي',
+      'refresh': 'تحديث',
+      'clear_all': 'مسح جميع الرسائل',
+      'safety_disclaimer': 'يرجى الملاحظة، يتم تسجيل المحادثات لأسباب تتعلق بالأمان.',
+      'attached_image': 'الصورة المرفقة',
+      'attach_image_tooltip': 'إرفاق صورة',
+      'input_hint': 'اكتب رسالة للراكب...',
+      'image_load_failed': 'فشل تحميل الصورة',
+      'empty_chat_title': 'ابدأ المحادثة مع الراكب',
+      'empty_chat_desc': 'أرسل رسائل لتنسيق نقطة الانطلاق والازدحام وتفاصيل الرحلة.',
+      'inbox_title': 'صندوق المحادثات',
+      'tab_all': 'كل الرسائل',
+      'tab_active': 'المشاوير النشطة',
+      'tab_previous': 'السابقة',
+      'empty_all': 'صندوق الرسائل فارغ حالياً',
+      'empty_active': 'لا توجد محادثات لمشاوير جارية',
+      'empty_previous': 'لا توجد محادثات سابقة',
+      'empty_section_hint': 'سيتم أرشفة محادثات المشاوير هنا.',
+      'default_vehicle': 'سيارة / دراجة',
+      'status_ongoing': 'جارٍ',
+      'pickup_point_default': 'نقطة الانطلاق',
+      'tap_to_start_chat': 'اضغط لبدء المحادثة',
+      'call_direct': 'اتصال مباشر',
+      'no_valid_phone': 'لا يوجد رقم هاتف صالح للراكب',
+      'cannot_call': 'تعذر إجراء المكالمة إلى',
+      'call_error': 'خطأ في الاتصال بـ',
+      'image_select_error': 'فشل اختيار الصورة',
+      'attach_image_title': 'إرفاق صورة',
+      'take_photo': 'التقاط صورة (الكاميرا)',
+      'choose_gallery': 'اختيار من المعرض',
+      'sending_image_placeholder': '📷 [جارٍ إرسال الصورة...]',
+      'msg_send_failed': 'فشل إرسال الرسالة',
+      'message_deleted': 'تم حذف الرسالة بنجاح',
+      'clear_chat_title': 'مسح سجل المحادثة؟',
+      'clear_chat_desc': 'هل أنت متأكد من حذف جميع رسائل هذا المشوار؟ لا يمكن التراجع عن هذا الإجراء.',
+      'no_cancel': 'لا، إلغاء',
+      'yes_delete': 'نعم، حذف',
+      'chat_cleared_success': 'تم مسح المحادثة بنجاح',
+      'reaction_added': 'تمت إضافة التفاعل',
+      'copy_message': 'نسخ الرسالة',
+      'delete_message': 'حذف الرسالة',
+      'help_report': 'المساعدة / بلاغ',
+      'helpline_prompt': 'يرجى الاتصال بخط المساعدة للدعم',
+      'text_copied': 'تم نسخ النص إلى الحافظة',
+
+      'qr_hello': 'مرحباً 👋',
+      'qr_arrived': 'لقد وصلت إلى نقطة الانطلاق 📍',
+      'qr_where': 'أين أنت؟ 🚗',
+      'qr_5min': 'سأصل خلال 5 دقائق ⏳',
+      'qr_traffic': 'عالق في الازدحام المروري 🚦',
+      'qr_waiting': 'أنا بانتظارك',
+      'qr_thanks': 'شكراً جزيلاً! 🙏',
+    },
+    'hi': {
+      'passenger_default': 'यात्री',
+      'active_ride_chat': 'सक्रिय सवारी चैट',
+      'live_status': 'लाइव',
+      'online_status': 'ऑनलाइन',
+      'call_action_tooltip': 'फ़ोन कॉल करें',
+      'refresh': 'ताज़ा करें',
+      'clear_all': 'सभी संदेश हटाएं',
+      'safety_disclaimer': 'कृपया ध्यान दें, सुरक्षा के लिए आपकी बातचीत रिकॉर्ड की जाती है।',
+      'attached_image': 'संलग्न छवि',
+      'attach_image_tooltip': 'तस्वीर भेजें',
+      'input_hint': 'यात्री को संदेश लिखें...',
+      'image_load_failed': 'छवि लोड करने में विफल',
+      'empty_chat_title': 'यात्री के साथ बातचीत शुरू करें',
+      'empty_chat_desc': 'पिकअप स्थान, ट्रैफ़िक या यात्रा नोट्स के लिए संदेश भेजें।',
+      'inbox_title': 'चैट इनबॉक्स',
+      'tab_all': 'सभी संदेश',
+      'tab_active': 'सक्रिय सवारी',
+      'tab_previous': 'पिछली',
+      'empty_all': 'संदेश सूची खाली है',
+      'empty_active': 'कोई सक्रिय सवारी चैट नहीं मिली',
+      'empty_previous': 'कोई पिछली चैट नहीं मिली',
+      'empty_section_hint': 'सवारी के दौरान संदेश और इतिहास यहां दिखाई देंगे।',
+      'default_vehicle': 'कार / बाइक',
+      'status_ongoing': 'जारी',
+      'pickup_point_default': 'पिकअप स्थान',
+      'tap_to_start_chat': 'चैट शुरू करने के लिए टैप करें',
+      'call_direct': 'सीधा कॉल करें',
+      'no_valid_phone': 'यात्री का कोई मान्य फोन नंबर नहीं मिला',
+      'cannot_call': 'कॉल नहीं किया जा सका',
+      'call_error': 'कॉल करने में त्रुटि',
+      'image_select_error': 'छवि चुनने में समस्या हुई',
+      'attach_image_title': 'तस्वीर संलग्न करें',
+      'take_photo': 'कैमरे से फोटो लें',
+      'choose_gallery': 'गैलरी से चुनें',
+      'sending_image_placeholder': '📷 [छवि भेजी जा रही है...]',
+      'msg_send_failed': 'संदेश भेजने में विफल',
+      'message_deleted': 'संदेश हटा दिया गया',
+      'clear_chat_title': 'क्या चैट हटाना चाहते हैं?',
+      'clear_chat_desc': 'क्या आप इस सवारी के सभी संदेश हटाना चाहते हैं? इसे वापस नहीं लाया जा सकता।',
+      'no_cancel': 'नहीं, रद्द करें',
+      'yes_delete': 'हाँ, हटाएं',
+      'chat_cleared_success': 'चैट सफलतापूर्वक हटा दी गई',
+      'reaction_added': 'प्रतिक्रिया जोड़ी गई',
+      'copy_message': 'संदेश कॉपी करें',
+      'delete_message': 'संदेश हटाएं',
+      'help_report': 'मदद / रिपोर्ट',
+      'helpline_prompt': 'सहायता के लिए हेल्पलाइन पर कॉल करें',
+      'text_copied': 'टेक्स्ट कॉपी किया गया',
+
+      'qr_hello': 'नमस्ते 👋',
+      'qr_arrived': 'मैं पिकअप स्थान पर पहुंच गया हूं 📍',
+      'qr_where': 'आप कहां हैं? 🚗',
+      'qr_5min': '5 मिनट में पहुंच रहा हूं ⏳',
+      'qr_traffic': 'ट्रैफिक जाम में फंसा हुआ हूं 🚦',
+      'qr_waiting': 'मैं आपका इंतजार कर रहा हूं',
+      'qr_thanks': 'धन्यवाद! 🙏',
+    },
+    'es': {
+      'passenger_default': 'Pasajero',
+      'active_ride_chat': 'Chat de viaje activo',
+      'live_status': 'En vivo',
+      'online_status': 'En línea',
+      'call_action_tooltip': 'Llamada telefónica',
+      'refresh': 'Actualizar',
+      'clear_all': 'Borrar todos los mensajes',
+      'safety_disclaimer': 'Tenga en cuenta que sus conversaciones se graban por seguridad.',
+      'attached_image': 'Imagen adjunta',
+      'attach_image_tooltip': 'Adjuntar imagen',
+      'input_hint': 'Escribe un mensaje al pasajero...',
+      'image_load_failed': 'Error al cargar imagen',
+      'empty_chat_title': 'Inicia una conversación con el pasajero',
+      'empty_chat_desc': 'Envía mensajes sobre punto de recogida, tráfico o detalles del viaje.',
+      'inbox_title': 'Bandeja de chats',
+      'tab_all': 'Todos los mensajes',
+      'tab_active': 'Viajes activos',
+      'tab_previous': 'Anteriores',
+      'empty_all': 'La lista de mensajes está vacía',
+      'empty_active': 'No hay chats de viajes activos',
+      'empty_previous': 'No hay chats previos',
+      'empty_section_hint': 'Los mensajes de viaje se archivarán aquí.',
+      'default_vehicle': 'Auto / Moto',
+      'status_ongoing': 'En curso',
+      'pickup_point_default': 'Punto de recogida',
+      'tap_to_start_chat': 'Toca para iniciar chat',
+      'call_direct': 'Llamada directa',
+      'no_valid_phone': 'No se encontró un número válido del pasajero',
+      'cannot_call': 'No se puede llamar a',
+      'call_error': 'Error al llamar a',
+      'image_select_error': 'Error al seleccionar imagen',
+      'attach_image_title': 'Adjuntar imagen',
+      'take_photo': 'Tomar foto (Cámara)',
+      'choose_gallery': 'Elegir de galería',
+      'sending_image_placeholder': '📷 [Enviando imagen...]',
+      'msg_send_failed': 'No se pudo enviar el mensaje',
+      'message_deleted': 'Mensaje eliminado',
+      'clear_chat_title': '¿Borrar conversación?',
+      'clear_chat_desc': '¿Está seguro de eliminar todos los mensajes de este viaje? Esta acción no se puede deshacer.',
+      'no_cancel': 'No, cancelar',
+      'yes_delete': 'Sí, borrar',
+      'chat_cleared_success': 'Chat borrado con éxito',
+      'reaction_added': 'reacción añadida',
+      'copy_message': 'Copiar mensaje',
+      'delete_message': 'Eliminar mensaje',
+      'help_report': 'Ayuda / Reportar',
+      'helpline_prompt': 'Llame a la línea de ayuda para asistencia',
+      'text_copied': 'Texto copiado al portapapeles',
+
+      'qr_hello': 'Hola 👋',
+      'qr_arrived': 'Llegué al punto de recogida 📍',
+      'qr_where': '¿Dónde estás? 🚗',
+      'qr_5min': 'Llego en 5 minutos ⏳',
+      'qr_traffic': 'Atascado en el tráfico 🚦',
+      'qr_waiting': 'Te estoy esperando',
+      'qr_thanks': '¡Muchas gracias! 🙏',
+    },
+    'fr': {
+      'passenger_default': 'Passager',
+      'active_ride_chat': 'Chat de course active',
+      'live_status': 'En direct',
+      'online_status': 'En ligne',
+      'call_action_tooltip': 'Appel téléphonique',
+      'refresh': 'Actualiser',
+      'clear_all': 'Effacer tous les messages',
+      'safety_disclaimer': 'Veuillez noter que les échanges sont enregistrés pour des raisons de sécurité.',
+      'attached_image': 'Image jointe',
+      'attach_image_tooltip': 'Joindre une image',
+      'input_hint': 'Écrivez un message au passager...',
+      'image_load_failed': 'Échec du chargement de l\'image',
+      'empty_chat_title': 'Démarrer une conversation',
+      'empty_chat_desc': 'Envoyez des messages pour le point de prise en charge ou le trafic.',
+      'inbox_title': 'Boîte de messagerie',
+      'tab_all': 'Tous les messages',
+      'tab_active': 'Courses actives',
+      'tab_previous': 'Précédentes',
+      'empty_all': 'Historique des messages vide',
+      'empty_active': 'Aucune course active',
+      'empty_previous': 'Aucun chat précédent',
+      'empty_section_hint': 'Les messages de vos courses seront archivés ici.',
+      'default_vehicle': 'Voiture / Moto',
+      'status_ongoing': 'En cours',
+      'pickup_point_default': 'Point de rendez-vous',
+      'tap_to_start_chat': 'Appuyez pour discuter',
+      'call_direct': 'Appel direct',
+      'no_valid_phone': 'Aucun numéro valide trouvé',
+      'cannot_call': 'Impossible d\'appeler',
+      'call_error': 'Erreur lors de l\'appel',
+      'image_select_error': 'Échec de la sélection de l\'image',
+      'attach_image_title': 'Joindre une photo',
+      'take_photo': 'Prendre une photo (Appareil)',
+      'choose_gallery': 'Choisir depuis la galerie',
+      'sending_image_placeholder': '📷 [Envoi de l\'image...]',
+      'msg_send_failed': 'Échec de l\'envoi du message',
+      'message_deleted': 'Message supprimé',
+      'clear_chat_title': 'Effacer la conversation ?',
+      'clear_chat_desc': 'Voulez-vous vraiment supprimer tous les messages de cette course ?',
+      'no_cancel': 'Non, annuler',
+      'yes_delete': 'Oui, supprimer',
+      'chat_cleared_success': 'Conversation effacée avec succès',
+      'reaction_added': 'réaction ajoutée',
+      'copy_message': 'Copier le message',
+      'delete_message': 'Supprimer le message',
+      'help_report': 'Aide / Signaler',
+      'helpline_prompt': 'Veuillez appeler l\'assistance',
+      'text_copied': 'Texte copié dans le presse-papiers',
+
+      'qr_hello': 'Bonjour 👋',
+      'qr_arrived': 'Je suis au point de rendez-vous 📍',
+      'qr_where': 'Où êtes-vous ? 🚗',
+      'qr_5min': 'J\'arrive dans 5 minutes ⏳',
+      'qr_traffic': 'Bloqué dans les bouchons 🚦',
+      'qr_waiting': 'Je vous attends',
+      'qr_thanks': 'Merci beaucoup ! 🙏',
+    },
+    'zh': {
+      'passenger_default': '乘客',
+      'active_ride_chat': '当前订单聊天',
+      'live_status': '实时',
+      'online_status': '在线',
+      'call_action_tooltip': '拨打电话',
+      'refresh': '刷新',
+      'clear_all': '清空所有消息',
+      'safety_disclaimer': '为保障安全，所有沟通记录将被妥善留存。',
+      'attached_image': '已选图片',
+      'attach_image_tooltip': '发送图片',
+      'input_hint': '给乘客发送消息...',
+      'image_load_failed': '图片加载失败',
+      'empty_chat_title': '开始与乘客沟通',
+      'empty_chat_desc': '发送上车地点、路况或接单注意事项。',
+      'inbox_title': '消息与沟通',
+      'tab_all': '全部消息',
+      'tab_active': '进行中订单',
+      'tab_previous': '历史订单',
+      'empty_all': '暂无任何消息记录',
+      'empty_active': '无进行中订单的聊天',
+      'empty_previous': '暂无历史聊天',
+      'empty_section_hint': '行程沟通记录将保存在此处。',
+      'default_vehicle': '汽车 / 摩托车',
+      'status_ongoing': '进行中',
+      'pickup_point_default': '上车点',
+      'tap_to_start_chat': '点击进入对话',
+      'call_direct': '直接拨打',
+      'no_valid_phone': '未获取到乘客有效电话',
+      'cannot_call': '无法呼叫',
+      'call_error': '呼叫异常',
+      'image_select_error': '选择图片失败',
+      'attach_image_title': '添加图片',
+      'take_photo': '拍照上传',
+      'choose_gallery': '相册选择',
+      'sending_image_placeholder': '📷 [正在发送图片...]',
+      'msg_send_failed': '消息发送失败',
+      'message_deleted': '消息已删除',
+      'clear_chat_title': '清空聊天记录？',
+      'clear_chat_desc': '确定要彻底清除当前订单的所有聊天记录吗？此操作不可逆。',
+      'no_cancel': '取消',
+      'yes_delete': '确认清空',
+      'chat_cleared_success': '聊天记录已成功清空',
+      'reaction_added': '已添加表情回应',
+      'copy_message': '复制文本',
+      'delete_message': '删除此条',
+      'help_report': '求助与举报',
+      'helpline_prompt': '请拨打客服电话寻求人工协助',
+      'text_copied': '已复制到剪贴板',
+
+      'qr_hello': '您好 👋',
+      'qr_arrived': '我已到达上车点 📍',
+      'qr_where': '您在哪里？🚗',
+      'qr_5min': '预计5分钟内到达 ⏳',
+      'qr_traffic': '路上遇堵车，稍等 🚦',
+      'qr_waiting': '我正在原地等您',
+      'qr_thanks': '非常感谢！🙏',
+    },
+    'pt': {
+      'passenger_default': 'Passageiro',
+      'active_ride_chat': 'Chat da corrida ativa',
+      'live_status': 'Ao vivo',
+      'online_status': 'Online',
+      'call_action_tooltip': 'Ligar para passageiro',
+      'refresh': 'Atualizar',
+      'clear_all': 'Limpar todas as mensagens',
+      'safety_disclaimer': 'Suas conversas são gravadas para sua segurança.',
+      'attached_image': 'Imagem anexada',
+      'attach_image_tooltip': 'Anexar imagem',
+      'input_hint': 'Digite uma mensagem ao passageiro...',
+      'image_load_failed': 'Falha ao carregar imagem',
+      'empty_chat_title': 'Inicie a conversa com o passageiro',
+      'empty_chat_desc': 'Envie mensagens sobre local de embarque, trânsito ou instruções.',
+      'inbox_title': 'Caixa de Mensagens',
+      'tab_all': 'Todas',
+      'tab_active': 'Corridas Ativas',
+      'tab_previous': 'Anteriores',
+      'empty_all': 'Nenhuma mensagem encontrada',
+      'empty_active': 'Sem chats de corridas ativas',
+      'empty_previous': 'Sem conversas anteriores',
+      'empty_section_hint': 'As mensagens das viagens aparecerão aqui.',
+      'default_vehicle': 'Carro / Moto',
+      'status_ongoing': 'Em andamento',
+      'pickup_point_default': 'Local de embarque',
+      'tap_to_start_chat': 'Toque para conversar',
+      'call_direct': 'Ligar direto',
+      'no_valid_phone': 'Nenhum número de telefone válido encontrado',
+      'cannot_call': 'Não é possível ligar para',
+      'call_error': 'Erro ao ligar para',
+      'image_select_error': 'Falha ao selecionar imagem',
+      'attach_image_title': 'Anexar Foto',
+      'take_photo': 'Tirar Foto (Câmera)',
+      'choose_gallery': 'Escolher da Galeria',
+      'sending_image_placeholder': '📷 [Enviando imagem...]',
+      'msg_send_failed': 'Falha ao enviar mensagem',
+      'message_deleted': 'Mensagem excluída',
+      'clear_chat_title': 'Limpar histórico de chat?',
+      'clear_chat_desc': 'Tem certeza que deseja apagar todas as mensagens desta corrida?',
+      'no_cancel': 'Não, cancelar',
+      'yes_delete': 'Sim, excluir',
+      'chat_cleared_success': 'Chat limpo com sucesso',
+      'reaction_added': 'reação adicionada',
+      'copy_message': 'Copiar mensagem',
+      'delete_message': 'Excluir mensagem',
+      'help_report': 'Ajuda / Denúncia',
+      'helpline_prompt': 'Ligue para a central para suporte',
+      'text_copied': 'Texto copiado para a área de transferência',
+
+      'qr_hello': 'Olá 👋',
+      'qr_arrived': 'Cheguei ao ponto de embarque 📍',
+      'qr_where': 'Onde você está? 🚗',
+      'qr_5min': 'Chego em 5 minutos ⏳',
+      'qr_traffic': 'Preso no trânsito 🚦',
+      'qr_waiting': 'Estou te esperando',
+      'qr_thanks': 'Muito obrigado! 🙏',
+    },
+    'ru': {
+      'passenger_default': 'Пассажир',
+      'active_ride_chat': 'Чат текущей поездки',
+      'live_status': 'В эфире',
+      'online_status': 'В сети',
+      'call_action_tooltip': 'Позвонить пассажиру',
+      'refresh': 'Обновить',
+      'clear_all': 'Очистить всю переписку',
+      'safety_disclaimer': 'В целях безопасности сообщения сохраняются.',
+      'attached_image': 'Прикрепленное фото',
+      'attach_image_tooltip': 'Отправить фото',
+      'input_hint': 'Напишите пассажиру...',
+      'image_load_failed': 'Не удалось загрузить фото',
+      'empty_chat_title': 'Начните диалог с пассажиром',
+      'empty_chat_desc': 'Отправляйте сообщения о точке посадки или дорожной ситуации.',
+      'inbox_title': 'Входящие сообщения',
+      'tab_all': 'Все сообщения',
+      'tab_active': 'Текущие поездки',
+      'tab_previous': 'Предыдущие',
+      'empty_all': 'Список сообщений пуст',
+      'empty_active': 'Нет чатов по активным поездкам',
+      'empty_previous': 'Нет завершенных диалогов',
+      'empty_section_hint': 'История сообщений отобразится здесь.',
+      'default_vehicle': 'Авто / Мото',
+      'status_ongoing': 'В пути',
+      'pickup_point_default': 'Точка посадки',
+      'tap_to_start_chat': 'Нажмите для открытия чата',
+      'call_direct': 'Прямой звонок',
+      'no_valid_phone': 'Номер пассажира не найден',
+      'cannot_call': 'Не удалось совершить вызов на',
+      'call_error': 'Ошибка вызова на',
+      'image_select_error': 'Ошибка выбора фото',
+      'attach_image_title': 'Прикрепить фото',
+      'take_photo': 'Сделать снимок (Камера)',
+      'choose_gallery': 'Выбрать из галереи',
+      'sending_image_placeholder': '📷 [Отправка фото...]',
+      'msg_send_failed': 'Не удалось отправить сообщение',
+      'message_deleted': 'Сообщение удалено',
+      'clear_chat_title': 'Очистить чат?',
+      'clear_chat_desc': 'Вы уверены, что хотите удалить все сообщения этой поездки?',
+      'no_cancel': 'Отмена',
+      'yes_delete': 'Да, удалить',
+      'chat_cleared_success': 'Чат успешно очищен',
+      'reaction_added': 'реакция добавлена',
+      'copy_message': 'Копировать сообщение',
+      'delete_message': 'Удалить сообщение',
+      'help_report': 'Помощь / Жалоба',
+      'helpline_prompt': 'Позвоните в службу поддержки',
+      'text_copied': 'Текст скопирован',
+
+      'qr_hello': 'Здравствуйте 👋',
+      'qr_arrived': 'Я на месте посадки 📍',
+      'qr_where': 'Где вы находитесь? 🚗',
+      'qr_5min': 'Буду через 5 минут ⏳',
+      'qr_traffic': 'Застрял в пробке 🚦',
+      'qr_waiting': 'Я жду вас',
+      'qr_thanks': 'Большое спасибо! 🙏',
+    },
+    'id': {
+      'passenger_default': 'Penumpang',
+      'active_ride_chat': 'Obrolan Pesanan Aktif',
+      'live_status': 'Langsung',
+      'online_status': 'Online',
+      'call_action_tooltip': 'Panggilan Suara / Telepon',
+      'refresh': 'Segarkan',
+      'clear_all': 'Hapus Semua Pesan',
+      'safety_disclaimer': 'Demi keamanan, percakapan Anda direkam.',
+      'attached_image': 'Gambar Terlampir',
+      'attach_image_tooltip': 'Kirim Foto',
+      'input_hint': 'Ketik pesan ke penumpang...',
+      'image_load_failed': 'Gagal memuat gambar',
+      'empty_chat_title': 'Mulai percakapan dengan penumpang',
+      'empty_chat_desc': 'Kirim pesan terkait lokasi jemput, macet atau arahan jalan.',
+      'inbox_title': 'Kotak Masuk Chat',
+      'tab_all': 'Semua Pesan',
+      'tab_active': 'Pesanan Aktif',
+      'tab_previous': 'Riwayat Lalu',
+      'empty_all': 'Daftar pesan masih kosong',
+      'empty_active': 'Tidak ada obrolan pesanan aktif',
+      'empty_previous': 'Tidak ada riwayat obrolan',
+      'empty_section_hint': 'Pesan selama perjalanan akan disimpan di sini.',
+      'default_vehicle': 'Mobil / Motor',
+      'status_ongoing': 'Sedang Berjalan',
+      'pickup_point_default': 'Titik Jemput',
+      'tap_to_start_chat': 'Ketuk untuk membuka obrolan',
+      'call_direct': 'Telepon Langsung',
+      'no_valid_phone': 'Nomor telepon penumpang tidak ditemukan',
+      'cannot_call': 'Tidak dapat memanggil ke',
+      'call_error': 'Terjadi kesalahan panggilan ke',
+      'image_select_error': 'Gagal memilih gambar',
+      'attach_image_title': 'Lampirkan Gambar',
+      'take_photo': 'Ambil Foto (Kamera)',
+      'choose_gallery': 'Pilih dari Galeri',
+      'sending_image_placeholder': '📷 [Mengirim foto...]',
+      'msg_send_failed': 'Gagal mengirim pesan',
+      'message_deleted': 'Pesan berhasil dihapus',
+      'clear_chat_title': 'Hapus Percakapan?',
+      'clear_chat_desc': 'Apakah Anda yakin ingin menghapus semua pesan pada pesanan ini?',
+      'no_cancel': 'Batal',
+      'yes_delete': 'Ya, Hapus',
+      'chat_cleared_success': 'Obrolan berhasil dihapus',
+      'reaction_added': 'reaksi ditambahkan',
+      'copy_message': 'Salin Pesan',
+      'delete_message': 'Hapus Pesan',
+      'help_report': 'Bantuan / Laporan',
+      'helpline_prompt': 'Hubungi pusat bantuan untuk dukungan',
+      'text_copied': 'Teks disalin ke papan klip',
+
+      'qr_hello': 'Halo 👋',
+      'qr_arrived': 'Saya sudah tiba di titik jemput 📍',
+      'qr_where': 'Di mana posisi Anda? 🚗',
+      'qr_5min': 'Tiba sekitar 5 menit ⏳',
+      'qr_traffic': 'Terjebak macet jalanan 🚦',
+      'qr_waiting': 'Saya sedang menunggu Anda',
+      'qr_thanks': 'Terima kasih banyak! 🙏',
+    },
+    'tr': {
+      'passenger_default': 'Yolcu',
+      'active_ride_chat': 'Aktif Yolculuk Sohbeti',
+      'live_status': 'Canlı',
+      'online_status': 'Çevrimiçi',
+      'call_action_tooltip': 'Sesli / Telefon Araması',
+      'refresh': 'Yenile',
+      'clear_all': 'Tüm Mesajları Temizle',
+      'safety_disclaimer': 'Güvenlik amacıyla tüm yazışmalar kayıt altındadır.',
+      'attached_image': 'Eklenen Fotoğraf',
+      'attach_image_tooltip': 'Fotoğraf Gönder',
+      'input_hint': 'Yolcuya mesaj yazın...',
+      'image_load_failed': 'Fotoğraf yüklenemedi',
+      'empty_chat_title': 'Yolcu ile mesajlaşmayı başlatın',
+      'empty_chat_desc': 'Biniş konumu, trafik durumu veya rota hakkında yazabilirsiniz.',
+      'inbox_title': 'Sohbet Kutusu',
+      'tab_all': 'Tüm Mesajlar',
+      'tab_active': 'Aktif Yolculuklar',
+      'tab_previous': 'Önceki',
+      'empty_all': 'Mesaj kutunuz boş',
+      'empty_active': 'Aktif yolculuk sohbeti yok',
+      'empty_previous': 'Önceki sohbet bulunmuyor',
+      'empty_section_hint': 'Yolculuk mesajlarınız burada arşivlenir.',
+      'default_vehicle': 'Otomobil / Motor',
+      'status_ongoing': 'Devam Ediyor',
+      'pickup_point_default': 'Kalkış Noktası',
+      'tap_to_start_chat': 'Sohbeti açmak için dokunun',
+      'call_direct': 'Doğrudan Ara',
+      'no_valid_phone': 'Yolcuya ait geçerli telefon numarası bulunamadı',
+      'cannot_call': 'Arama yapılamıyor:',
+      'call_error': 'Arama hatası:',
+      'image_select_error': 'Fotoğraf seçilemedi',
+      'attach_image_title': 'Fotoğraf Ekle',
+      'take_photo': 'Fotoğraf Çek (Kamera)',
+      'choose_gallery': 'Galeriden Seç',
+      'sending_image_placeholder': '📷 [Fotoğraf gönderiliyor...]',
+      'msg_send_failed': 'Mesaj gönderilemedi',
+      'message_deleted': 'Mesaj silindi',
+      'clear_chat_title': 'Sohbeti Temizle?',
+      'clear_chat_desc': 'Bu yolculuğa ait tüm mesajları silmek istediğinizden emin misiniz?',
+      'no_cancel': 'İptal',
+      'yes_delete': 'Evet, Sil',
+      'chat_cleared_success': 'Sohbet başarıyla temizlendi',
+      'reaction_added': 'tepki eklendi',
+      'copy_message': 'Mesajı Kopyala',
+      'delete_message': 'Mesajı Sil',
+      'help_report': 'Yardım / Bildir',
+      'helpline_prompt': 'Destek için yardım hattını arayın',
+      'text_copied': 'Metin panoya kopyalandı',
+
+      'qr_hello': 'Merhaba 👋',
+      'qr_arrived': 'Biniş noktasına ulaştım 📍',
+      'qr_where': 'Neredesiniz? 🚗',
+      'qr_5min': '5 dakika içinde oradayım ⏳',
+      'qr_traffic': 'Trafikte sıkıştım 🚦',
+      'qr_waiting': 'Sizi bekliyorum',
+      'qr_thanks': 'Çok teşekkürler! 🙏',
+    },
+    'de': {
+      'passenger_default': 'Fahrgast',
+      'active_ride_chat': 'Aktiver Fahrt-Chat',
+      'live_status': 'Live',
+      'online_status': 'Online',
+      'call_action_tooltip': 'Anrufen',
+      'refresh': 'Aktualisieren',
+      'clear_all': 'Alle Nachrichten löschen',
+      'safety_disclaimer': 'Aus Sicherheitsgründen werden alle Nachrichten aufgezeichnet.',
+      'attached_image': 'Angehängtes Bild',
+      'attach_image_tooltip': 'Bild anhängen',
+      'input_hint': 'Nachricht an den Fahrgast schreiben...',
+      'image_load_failed': 'Bild konnte nicht geladen werden',
+      'empty_chat_title': 'Unterhaltung mit dem Fahrgast starten',
+      'empty_chat_desc': 'Nachrichten zu Abholort, Verkehr oder Anweisungen senden.',
+      'inbox_title': 'Chat-Posteingang',
+      'tab_all': 'Alle Nachrichten',
+      'tab_active': 'Aktive Fahrten',
+      'tab_previous': 'Vorherige',
+      'empty_all': 'Keine Nachrichten vorhanden',
+      'empty_active': 'Keine aktiven Fahrt-Chats',
+      'empty_previous': 'Keine früheren Chats',
+      'empty_section_hint': 'Nachrichten zu Ihren Fahrten werden hier gespeichert.',
+      'default_vehicle': 'Auto / Motorrad',
+      'status_ongoing': 'Unterwegs',
+      'pickup_point_default': 'Abholort',
+      'tap_to_start_chat': 'Tippen, um Chat zu öffnen',
+      'call_direct': 'Direkt anrufen',
+      'no_valid_phone': 'Keine gültige Telefonnummer gefunden',
+      'cannot_call': 'Anruf nicht möglich an',
+      'call_error': 'Fehler beim Anrufen von',
+      'image_select_error': 'Bildauswahl fehlgeschlagen',
+      'attach_image_title': 'Bild anhängen',
+      'take_photo': 'Foto aufnehmen (Kamera)',
+      'choose_gallery': 'Aus Galerie wählen',
+      'sending_image_placeholder': '📷 [Bild wird gesendet...]',
+      'msg_send_failed': 'Nachricht konnte nicht gesendet werden',
+      'message_deleted': 'Nachricht gelöscht',
+      'clear_chat_title': 'Chatverlauf löschen?',
+      'clear_chat_desc': 'Möchten Sie wirklich alle Nachrichten dieser Fahrt löschen?',
+      'no_cancel': 'Abbrechen',
+      'yes_delete': 'Ja, löschen',
+      'chat_cleared_success': 'Chatverlauf erfolgreich gelöscht',
+      'reaction_added': 'Reaktion hinzugefügt',
+      'copy_message': 'Nachricht kopieren',
+      'delete_message': 'Nachricht löschen',
+      'help_report': 'Hilfe / Melden',
+      'helpline_prompt': 'Bitte rufen Sie die Hotline an',
+      'text_copied': 'Text in die Zwischenablage kopiert',
+
+      'qr_hello': 'Hallo 👋',
+      'qr_arrived': 'Ich bin am Abholort angekommen 📍',
+      'qr_where': 'Wo befinden Sie sich? 🚗',
+      'qr_5min': 'Komme in 5 Minuten an ⏳',
+      'qr_traffic': 'Stecke im Verkehr fest 🚦',
+      'qr_waiting': 'Ich warte auf Sie',
+      'qr_thanks': 'Vielen Dank! 🙏',
+    },
+  };
 }
