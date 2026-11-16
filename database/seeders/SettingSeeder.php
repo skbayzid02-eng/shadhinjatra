@@ -198,7 +198,7 @@ class SettingSeeder extends Seeder
             // Mandatory Driver Subscription Settings
             [
                 'key' => 'monthly_subscription_price',
-                'value' => '500.00',
+                'value' => '300.00',
                 'group' => 'subscription',
             ],
             [
@@ -213,17 +213,17 @@ class SettingSeeder extends Seeder
             ],
             [
                 'key' => 'bkash_merchant_number',
-                'value' => '01700000000',
+                'value' => '01405242920',
                 'group' => 'payment_gateway',
             ],
             [
                 'key' => 'nagad_merchant_number',
-                'value' => '01800000000',
+                'value' => '01405242920',
                 'group' => 'payment_gateway',
             ],
             [
                 'key' => 'rocket_merchant_number',
-                'value' => '01900000000',
+                'value' => '01405242920',
                 'group' => 'payment_gateway',
             ],
             [

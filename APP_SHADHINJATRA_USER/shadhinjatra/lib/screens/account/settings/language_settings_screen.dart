@@ -196,7 +196,14 @@ class _LanguageSettingsScreenState extends State<LanguageSettingsScreen> {
                             children: [
                               Text(native, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isSelected ? Colors.deepPurple : Colors.black87)),
                               const SizedBox(width: 8),
-                              Text('($name)', style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                              Flexible(
+                                child: Text(
+                                  '($name)',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                                ),
+                              ),
                             ],
                           ),
                           subtitle: Text('Language code: $code', style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),

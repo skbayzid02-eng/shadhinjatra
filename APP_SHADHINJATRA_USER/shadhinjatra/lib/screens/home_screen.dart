@@ -4426,26 +4426,32 @@ class _HomeScreenState extends State<HomeScreen> {
 
           // Header Row: Choose a trip + Trip summary
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Choose a trip',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 20,
-                      color: Colors.white,
-                      letterSpacing: -0.3,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Choose a trip',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 20,
+                        color: Colors.white,
+                        letterSpacing: -0.3,
+                      ),
                     ),
-                  ),
-                  Text(
-                    _t('select_vehicle_prompt'),
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade400, fontWeight: FontWeight.w500),
-                  ),
-                ],
+                    Text(
+                      _t('select_vehicle_prompt'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade400, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
               ),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
@@ -4454,6 +4460,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   border: Border.all(color: Colors.white12),
                 ),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(Icons.navigation_rounded, size: 13, color: Colors.amberAccent),
                     const SizedBox(width: 4),
@@ -4562,21 +4569,36 @@ class _HomeScreenState extends State<HomeScreen> {
                               // Name & Capacity Row
                               Row(
                                 children: [
-                                  Text(
-                                    vNameBn,
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w800,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '($vNameEn)',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey.shade400,
-                                      fontWeight: FontWeight.w500,
+                                  Flexible(
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            vNameBn,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w800,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Flexible(
+                                          child: Text(
+                                            '($vNameEn)',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey.shade400,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   const SizedBox(width: 6),
@@ -4618,21 +4640,29 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                   ),
                                   Text(' • ', style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
-                                  Text(
-                                    pickupEta,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: hasDrivers ? Colors.amberAccent : Colors.grey.shade400,
+                                  Flexible(
+                                    child: Text(
+                                      pickupEta,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: hasDrivers ? Colors.amberAccent : Colors.grey.shade400,
+                                      ),
                                     ),
                                   ),
                                   Text(' • ', style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
-                                  Text(
-                                    distanceText,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey.shade300,
-                                      fontWeight: FontWeight.w500,
+                                  Flexible(
+                                    child: Text(
+                                      distanceText,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey.shade300,
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -4856,9 +4886,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         const Icon(Icons.directions_car_filled_rounded, size: 20, color: Colors.black),
                         const SizedBox(width: 8),
-                        Text(
-                          '${_t('select_vehicle_btn')} ($activeVehicleBn)',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                        Flexible(
+                          child: Text(
+                            '${_t('select_vehicle_btn')} ($activeVehicleBn)',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                          ),
                         ),
                         if (_fareAmount > 0) ...[
                           const SizedBox(width: 8),
@@ -4903,12 +4937,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: isSelected ? Colors.black : Colors.white70,
               ),
               const SizedBox(width: 5),
-              Text(
-                label,
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 11,
-                  color: isSelected ? Colors.black : Colors.white70,
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                    color: isSelected ? Colors.black : Colors.white70,
+                  ),
                 ),
               ),
             ],
@@ -4970,44 +5008,56 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         const SizedBox(height: 12),
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _t('confirm_booking_btn'),
-                                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.white),
-                                ),
-                                Text(
-                                  _t('booking_details_title'),
-                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade400, fontWeight: FontWeight.w500),
-                                ),
-                              ],
-                            ),
-                            // Selected Vehicle Pill in Header (as in reference image)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF26262C),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: Colors.white24),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Icon(_getVehicleIcon(vehicle['icon']?.toString(), vName), size: 16, color: _getVehicleColor(vName)),
-                                  const SizedBox(width: 6),
                                   Text(
-                                    '$vNameBn • ৳${breakdown['total_fare']!.toStringAsFixed(0)}',
-                                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                    _t('confirm_booking_btn'),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.white),
                                   ),
-                                  const SizedBox(width: 8),
-                                  GestureDetector(
-                                    onTap: () => Navigator.pop(modalCtx),
-                                    child: const Icon(Icons.close_rounded, size: 18, color: Colors.white70),
+                                  Text(
+                                    _t('booking_details_title'),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(fontSize: 12, color: Colors.grey.shade400, fontWeight: FontWeight.w500),
                                   ),
                                 ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Selected Vehicle Pill in Header (as in reference image)
+                            Flexible(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF26262C),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: Colors.white24),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(_getVehicleIcon(vehicle['icon']?.toString(), vName), size: 16, color: _getVehicleColor(vName)),
+                                    const SizedBox(width: 6),
+                                    Flexible(
+                                      child: Text(
+                                        '$vNameBn • ৳${breakdown['total_fare']!.toStringAsFixed(0)}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    GestureDetector(
+                                      onTap: () => Navigator.pop(modalCtx),
+                                      child: const Icon(Icons.close_rounded, size: 18, color: Colors.white70),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ],
@@ -5150,9 +5200,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                     children: [
                                       Row(
                                         children: [
-                                          Text(
-                                            vNameBn,
-                                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white),
+                                          Flexible(
+                                            child: Text(
+                                              vNameBn,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white),
+                                            ),
                                           ),
                                           const SizedBox(width: 6),
                                           Container(
@@ -5163,30 +5217,51 @@ class _HomeScreenState extends State<HomeScreen> {
                                         ],
                                       ),
                                       const SizedBox(height: 4),
-                                      Row(
+                                      Wrap(
+                                        crossAxisAlignment: WrapCrossAlignment.center,
+                                        spacing: 8,
+                                        runSpacing: 2,
                                         children: [
-                                          const Icon(Icons.straighten_rounded, size: 13, color: Colors.amberAccent),
-                                          const SizedBox(width: 4),
-                                          Text('$_distanceKm কি.মি.', style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
-                                          const SizedBox(width: 12),
-                                          const Icon(Icons.timer_rounded, size: 13, color: Colors.cyanAccent),
-                                          const SizedBox(width: 4),
-                                          Text('$_durationMins ${_t('mins_unit')}', style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(Icons.straighten_rounded, size: 13, color: Colors.amberAccent),
+                                              const SizedBox(width: 3),
+                                              Text('$_distanceKm কি.মি.', style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+                                            ],
+                                          ),
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(Icons.timer_rounded, size: 13, color: Colors.cyanAccent),
+                                              const SizedBox(width: 3),
+                                              Text('$_durationMins ${_t('mins_unit')}', style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+                                            ],
+                                          ),
                                         ],
                                       ),
                                     ],
                                   ),
                                 ),
-                                if (badgeText.isNotEmpty)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF2563EB).withValues(alpha: 0.3),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: const Color(0xFF3B82F6), width: 0.8),
+                                if (badgeText.isNotEmpty) ...[
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF2563EB).withValues(alpha: 0.3),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: const Color(0xFF3B82F6), width: 0.8),
+                                      ),
+                                      child: Text(
+                                        badgeText,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                                      ),
                                     ),
-                                    child: Text(badgeText, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white)),
                                   ),
+                                ],
                               ],
                             ),
                           ),
@@ -5362,9 +5437,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                       children: [
                                         const Icon(Icons.check_circle_rounded, size: 20, color: Colors.white),
                                         const SizedBox(width: 8),
-                                        Text(
-                                          '${_t('confirm_booking_btn')} (৳${breakdown['total_fare']!.toStringAsFixed(0)})',
-                                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white),
+                                        Flexible(
+                                          child: Text(
+                                            '${_t('confirm_booking_btn')} (৳${breakdown['total_fare']!.toStringAsFixed(0)})',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white),
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -7909,7 +7988,12 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
             const SizedBox(width: 8),
-            Text('জরুরি সহায়তা $sosNumber', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Expanded(
+              child: Text(
+                'জরুরি সহায়তা $sosNumber',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+              ),
+            ),
           ],
         ),
         content: Text('আপনি কি সরাসরি $sosTitle এ কল করতে চান?'),

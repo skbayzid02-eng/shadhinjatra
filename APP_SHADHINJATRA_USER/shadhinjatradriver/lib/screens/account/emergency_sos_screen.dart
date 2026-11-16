@@ -978,7 +978,12 @@ class _EmergencySosScreenState extends State<EmergencySosScreen> with SingleTick
           children: [
             const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
             const SizedBox(width: 8),
-            Text(_t('sos_dialog_title'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            Expanded(
+              child: Text(
+                _t('sos_dialog_title'),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+            ),
           ],
         ),
         content: Column(

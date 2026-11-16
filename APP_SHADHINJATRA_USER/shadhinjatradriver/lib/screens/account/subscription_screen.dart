@@ -91,8 +91,15 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
           textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
           child: StatefulBuilder(
             builder: (modalContext, setModalState) {
-              final priceFormatted = _plan['price_formatted'] ?? '৳500.00';
-              final merchantNumber = gateway['merchant_number'] ?? '01700000000';
+              final priceFormatted = _plan['price_formatted'] ?? '৳300.00';
+              final rawNumber = gateway['merchant_number']?.toString();
+              final merchantNumber = (rawNumber != null &&
+                      rawNumber.isNotEmpty &&
+                      rawNumber != '01700000000' &&
+                      rawNumber != '01800000000' &&
+                      rawNumber != '01900000000')
+                  ? rawNumber
+                  : '01405242920';
               final gatewayName = gateway['name'] ?? 'bKash';
 
               return Padding(
@@ -259,7 +266,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                           controller: phoneController,
                           keyboardType: TextInputType.phone,
                           decoration: InputDecoration(
-                            hintText: 'e.g. 017xxxxxxxx',
+                            hintText: 'e.g. 017XXXXXXXX',
                             prefixIcon: const Icon(Icons.phone_android, color: Colors.grey),
                             filled: true,
                             fillColor: Colors.grey.shade50,
@@ -447,7 +454,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
-                                  _plan['price_formatted'] ?? '৳500.00',
+                                  _plan['price_formatted'] ?? '৳300.00',
                                   style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Color(0xFF1E1E2D)),
                                 ),
                                 const SizedBox(height: 6),
@@ -500,9 +507,24 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
-                                      g['name'].toString(),
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            g['name'].toString(),
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                                          ),
+                                          if (g['type'] == 'mfs' || id == 'bkash' || id == 'nagad' || id == 'rocket')
+                                            const Padding(
+                                              padding: EdgeInsets.only(top: 2),
+                                              child: Text(
+                                                'নম্বর: 01405242920',
+                                                style: TextStyle(fontSize: 11.5, color: Colors.orange, fontWeight: FontWeight.bold),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
                                     ),
                                     Radio<String>(
                                       value: id,
@@ -558,7 +580,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                           ..._paymentHistory.map((history) {
                             final inv = history['invoice_no'] ?? 'SUB-INV';
                             final method = history['payment_method_label'] ?? history['payment_method'] ?? 'bKash';
-                            final amt = history['amount_formatted'] ?? '৳500.00';
+                            final amt = history['amount_formatted'] ?? '৳300.00';
                             final date = history['date'] ?? history['starts_at'] ?? '';
                             return Card(
                               margin: const EdgeInsets.only(bottom: 8),

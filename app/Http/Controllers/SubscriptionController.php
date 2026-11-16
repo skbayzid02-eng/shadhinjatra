@@ -24,7 +24,7 @@ class SubscriptionController extends Controller
         /** @var User $user */
         $user = $request->user();
 
-        $price = (float) Setting::get('monthly_subscription_price', 500.00);
+        $price = (float) Setting::get('monthly_subscription_price', 300.00);
         $durationDays = (int) Setting::get('subscription_duration_days', 30);
         $planName = 'মাসিক ড্রাইভার সাবস্ক্রিপশন (Monthly Subscription)';
 
@@ -80,27 +80,27 @@ class SubscriptionController extends Controller
                 'name' => 'বিকাশ (bKash)',
                 'type' => 'mfs',
                 'logo' => 'bkash',
-                'merchant_number' => Setting::get('bkash_merchant_number', '01700000000'),
-                'account_type' => 'Merchant Account',
-                'instructions' => 'বিকাশ মার্চেন্ট নম্বরে ' . $price . ' টাকা পেমেন্ট করুন এবং প্রাপ্ত ট্রানজেকশন আইডি (TrxID) নিচে প্রদান করুন।',
+                'merchant_number' => Setting::get('bkash_merchant_number', '01405242920'),
+                'account_type' => 'bKash Account',
+                'instructions' => 'বিকাশ নম্বরে ' . $price . ' টাকা সেন্ড মানি বা পেমেন্ট করুন (নম্বর: 01405242920) এবং প্রাপ্ত ট্রানজেকশন আইডি (TrxID) নিচে প্রদান করুন।',
             ],
             [
                 'id' => 'nagad',
                 'name' => 'নগদ (Nagad)',
                 'type' => 'mfs',
                 'logo' => 'nagad',
-                'merchant_number' => Setting::get('nagad_merchant_number', '01800000000'),
-                'account_type' => 'Merchant Account',
-                'instructions' => 'নগদ মার্চেন্ট নম্বরে ' . $price . ' টাকা পেমেন্ট করুন এবং ট্রানজেকশন আইডি প্রদান করুন।',
+                'merchant_number' => Setting::get('nagad_merchant_number', '01405242920'),
+                'account_type' => 'Nagad Account',
+                'instructions' => 'নগদ নম্বরে ' . $price . ' টাকা সেন্ড মানি বা পেমেন্ট করুন (নম্বর: 01405242920) এবং ট্রানজেকশন আইডি প্রদান করুন।',
             ],
             [
                 'id' => 'rocket',
                 'name' => 'রকেট (Rocket)',
                 'type' => 'mfs',
                 'logo' => 'rocket',
-                'merchant_number' => Setting::get('rocket_merchant_number', '01900000000'),
-                'account_type' => 'Merchant / Agent Account',
-                'instructions' => 'রকেট নম্বরে ' . $price . ' টাকা সেন্ড মানি বা পেমেন্ট করে TrxID সাবমিট করুন।',
+                'merchant_number' => Setting::get('rocket_merchant_number', '01405242920'),
+                'account_type' => 'Rocket Account',
+                'instructions' => 'রকেট নম্বরে ' . $price . ' টাকা সেন্ড মানি বা পেমেন্ট করুন (নম্বর: 01405242920) এবং TrxID সাবমিট করুন।',
             ],
             [
                 'id' => 'sslcommerz',
@@ -180,7 +180,7 @@ class SubscriptionController extends Controller
         /** @var User $user */
         $user = $request->user();
 
-        $price = (float) Setting::get('monthly_subscription_price', 500.00);
+        $price = (float) Setting::get('monthly_subscription_price', 300.00);
         $durationDays = (int) Setting::get('subscription_duration_days', 30);
         $method = strtolower($validated['payment_method']);
 
@@ -342,7 +342,7 @@ class SubscriptionController extends Controller
             'success' => true,
             'message' => 'সাবস্ক্রিপশনের মূল্য সফলভাবে হালনাগাদ করা হয়েছে',
             'data' => [
-                'monthly_subscription_price' => (float) Setting::get('monthly_subscription_price', 500.00),
+                'monthly_subscription_price' => (float) Setting::get('monthly_subscription_price', 300.00),
                 'subscription_duration_days' => (int) Setting::get('subscription_duration_days', 30),
             ],
         ]);

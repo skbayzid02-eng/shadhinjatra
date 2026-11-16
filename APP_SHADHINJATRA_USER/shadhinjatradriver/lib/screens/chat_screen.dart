@@ -377,7 +377,12 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
             children: [
               const Icon(Icons.delete_sweep_rounded, color: Colors.red),
               const SizedBox(width: 8),
-              Text(_t(context, 'clear_chat_title')),
+              Expanded(
+                child: Text(
+                  _t(context, 'clear_chat_title'),
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                ),
+              ),
             ],
           ),
           content: Text(
@@ -1058,18 +1063,22 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         ],
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
           indicatorColor: const Color(0xFF2563EB),
           indicatorWeight: 3,
           labelColor: const Color(0xFF2563EB),
           unselectedLabelColor: Colors.grey.shade600,
+          labelPadding: const EdgeInsets.symmetric(horizontal: 14),
           labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
           tabs: [
             Tab(
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(_t(context, 'tab_all')),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 5),
                   _buildCountBadge(_counts['all'] ?? _allMessages.length),
                 ],
               ),
@@ -1079,7 +1088,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(_t(context, 'tab_active')),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 5),
                   _buildCountBadge(_counts['active'] ?? _activeChats.length, isHighlighted: true),
                 ],
               ),
@@ -1089,7 +1098,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(_t(context, 'tab_previous')),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 5),
                   _buildCountBadge(_counts['previous'] ?? _previousChats.length),
                 ],
               ),

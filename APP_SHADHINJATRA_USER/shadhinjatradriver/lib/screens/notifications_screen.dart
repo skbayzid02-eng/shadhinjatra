@@ -148,7 +148,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> with SingleTi
               children: [
                 const Icon(Icons.delete_sweep_rounded, color: Color(0xFFDC2626)),
                 const SizedBox(width: 8),
-                Text(_t(context, 'clear_dialog_title')),
+                Expanded(
+                  child: Text(
+                    _t(context, 'clear_dialog_title'),
+                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                ),
               ],
             ),
             content: Text(
@@ -648,7 +653,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> with SingleTi
               children: [
                 const Icon(Icons.help_outline_rounded, color: Color(0xFF2563EB)),
                 const SizedBox(width: 8),
-                Text(_t(context, 'help_dialog_title')),
+                Expanded(
+                  child: Text(
+                    _t(context, 'help_dialog_title'),
+                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                ),
               ],
             ),
             content: Text(

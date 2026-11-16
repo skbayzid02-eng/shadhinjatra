@@ -390,7 +390,12 @@ class _ChatScreenState extends State<ChatScreen> {
             children: [
               const Icon(Icons.delete_sweep, color: Colors.red),
               const SizedBox(width: 8),
-              Text(_ChatLocalization.get('clear_chat_title', langCode: lang)),
+              Expanded(
+                child: Text(
+                  _ChatLocalization.get('clear_chat_title', langCode: lang),
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                ),
+              ),
             ],
           ),
           content: Text(

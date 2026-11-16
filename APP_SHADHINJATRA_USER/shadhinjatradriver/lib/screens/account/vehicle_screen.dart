@@ -654,9 +654,13 @@ class _VehicleScreenState extends State<VehicleScreen> with SingleTickerProvider
                 ),
                 title: Row(
                   children: [
-                    Text(
-                      name,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    Flexible(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
                     ),
                     const SizedBox(width: 6),
                     Text(

@@ -480,7 +480,12 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
             children: [
               const Icon(Icons.flag_circle_rounded, color: Color(0xFF16A34A), size: 28),
               const SizedBox(width: 8),
-              Text(_t(context, 'end_trip_dialog_title'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              Expanded(
+                child: Text(
+                  _t(context, 'end_trip_dialog_title'),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                ),
+              ),
             ],
           ),
           content: Column(
@@ -639,7 +644,12 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
               children: [
                 const Icon(Icons.cancel_outlined, color: Colors.red),
                 const SizedBox(width: 8),
-                Text(_t(context, 'cancel_dialog_title'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                Expanded(
+                  child: Text(
+                    _t(context, 'cancel_dialog_title'),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  ),
+                ),
               ],
             ),
             content: Column(
