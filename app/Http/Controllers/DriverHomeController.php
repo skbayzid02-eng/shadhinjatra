@@ -1557,7 +1557,7 @@ class DriverHomeController extends Controller
      */
     public function cleanupInactiveDrivers()
     {
-        $cutoff = now()->subSeconds(90);
+        $cutoff = now()->subMinutes(30);
         User::where('is_online', true)
             ->whereDoesntHave('driverRides', function ($q) {
                 $q->whereIn('status', ['accepted', 'ongoing', 'started', 'arrived']);

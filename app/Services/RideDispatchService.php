@@ -32,11 +32,12 @@ class RideDispatchService
     /**
      * Progressive search radius tiers in kilometers:
      * 1. First 5.0 KM
-     * 2. Then 10.0 KM
-     * 3. Then 15.0 KM
-     * 4. Then 20.0 KM
+     * 2. Then 15.0 KM
+     * 3. Then 30.0 KM
+     * 4. Then 60.0 KM
+     * 5. Then 100.0 KM
      */
-    public const DEFAULT_RADIUS_TIERS = [5.0, 10.0, 15.0, 20.0];
+    public const DEFAULT_RADIUS_TIERS = [5.0, 15.0, 30.0, 60.0, 100.0];
 
     /**
      * Get search radius in kilometers.
@@ -80,17 +81,31 @@ class RideDispatchService
         // Drivers who already rejected or timed out on this ride
         $rejectedDriverIds = DriverRideRejection::where('ride_id', $ride->id)->pluck('driver_id')->toArray();
 
-        // Query available drivers matching strict criteria (and active within the last 90s)
+        // Query available drivers matching criteria:
+        // 1. Online: is_online = true and active (within last 30 minutes, or just online)
+        // 2. Vehicle matches users.vehicle_type OR active driver_vehicles.type
         $candidateDrivers = User::where('is_online', true)
-            ->where('last_seen_at', '>=', now()->subSeconds(90))
+            ->where(function ($q) {
+                $q->whereNull('last_seen_at')
+                  ->orWhere('last_seen_at', '>=', now()->subMinutes(30));
+            })
             ->where('id', '!=', $ride->user_id)
-            ->whereIn('vehicle_type', $compatibleTypes)
+            ->where(function ($q) use ($compatibleTypes) {
+                $q->whereIn('vehicle_type', $compatibleTypes)
+                  ->orWhereExists(function ($sub) use ($compatibleTypes) {
+                      $sub->select(\DB::raw(1))
+                          ->from('driver_vehicles')
+                          ->whereColumn('driver_vehicles.user_id', 'users.id')
+                          ->where('driver_vehicles.status', 'Active')
+                          ->whereIn('driver_vehicles.type', $compatibleTypes);
+                  });
+            })
             ->whereNotIn('id', $rejectedDriverIds)
-            // 1. Must be verified
+            // 3. Must be verified
             ->where('is_verified', true)
             ->where('verification_status', 'verified')
             ->where('documents_verified', true)
-            // 2. Must have active, unexpired subscription
+            // 4. Must have active, unexpired subscription
             ->where('subscription_status', 'active')
             ->where(function ($q) {
                 $q->whereNull('subscription_expires_at')
